@@ -18,9 +18,17 @@ class EACRenderer {
         
         CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
         
-        // Load default library
-        guard let library = device.makeDefaultLibrary(),
-              let function = library.makeFunction(name: "renderStackedView") else {
+        // Load Metal Library from resources
+        var library: MTLLibrary?
+        if let shaderURL = Bundle.module.url(forResource: "EACShader", withExtension: "metal"),
+           let shaderSource = try? String(contentsOf: shaderURL) {
+            library = try? device.makeLibrary(source: shaderSource, options: nil)
+        } else {
+            library = device.makeDefaultLibrary()
+        }
+        
+        guard let finalLibrary = library,
+              let function = finalLibrary.makeFunction(name: "renderStackedView") else {
             print("Failed to load Metal shader renderStackedView")
             return nil
         }
