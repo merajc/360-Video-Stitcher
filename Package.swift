@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "GoPro360Stitcher",
-            path: "Sources/GoPro360Stitcher"
+            path: "Sources/GoPro360Stitcher",
+            resources: [
+                .process("EACShader.metal")
+            ]
         )
     ]
 )

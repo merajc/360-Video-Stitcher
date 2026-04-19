@@ -3,6 +3,7 @@ import Observation
 import AVFoundation
 import CoreLocation
 
+@MainActor
 @Observable
 class VideoProcessor {
     var composition: AVMutableComposition?
