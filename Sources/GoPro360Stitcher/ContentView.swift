@@ -44,7 +44,7 @@ struct ContentView: View {
     @State private var tilt: Double = 0
     @State private var roll: Double = 0
     @State private var isTargeted = false
-    @State private var processor = VideoProcessor()
+    @StateObject private var processor = VideoProcessor()
     
     var body: some View {
         ZStack {

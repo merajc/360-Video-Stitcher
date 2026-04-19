@@ -1,20 +1,23 @@
 import Foundation
-import Observation
+import SwiftUI
 import AVFoundation
 import CoreLocation
 
 @MainActor
-@Observable
-class VideoProcessor {
-    var composition: AVMutableComposition?
-    var player: AVPlayer?
-    var videoComposition: AVMutableVideoComposition?
-    var isLoading: Bool = false
-    var error: Error?
+class VideoProcessor: ObservableObject {
+    @Published var composition: AVMutableComposition?
+    @Published var player: AVPlayer?
+    @Published var videoComposition: AVMutableVideoComposition?
+    @Published var isLoading: Bool = false
+    @Published var error: Error?
     
     // Extracted metadata
-    var extractedTelemetry: [CLLocationCoordinate2D] = []
+    @Published var extractedTelemetry: [CLLocationCoordinate2D] = []
     
+    func processFiles(urls: [URL]) async {
+        isLoading = true
+        defer { isLoading = false }
+        
         print("📽 [Processor] Starting ingestion of \(urls.count) items...")
         
         do {
@@ -37,8 +40,10 @@ class VideoProcessor {
             print("📽 [Processor] Initializing virtual stitching...")
             try await stitchFiles(urls: sortedUrls)
             print("✅ [Processor] Virtual timeline ready.")
+            
+        } catch {
             self.error = error
-            print("Error processing files: \(error.localizedDescription)")
+            print("❌ [Processor] Error processing files: \(error.localizedDescription)")
         }
     }
     
@@ -102,19 +107,8 @@ class VideoProcessor {
         guard let composition = composition else { return nil }
         
         return AVMutableVideoComposition(asset: composition) { request in
-            // This is where we apply the Metal shader to each frame
-            // For the 9:16 vertical output, we render Front on top and Rear on bottom
-            
             let sourceImage = request.sourceImage
-            let outputSize = request.renderSize
-            
-            // 1. Create destination image
-            // 2. Render Top Half (Front projection)
-            // 3. Render Bottom Half (Rear projection)
-            // 4. Overlay Track Map
-            
             // Note: In a real implementation we would use the EACRenderer here.
-            // For now, we return the source to allow the app to compile.
             request.finish(with: sourceImage, context: nil)
         }
     }
@@ -126,7 +120,7 @@ class VideoProcessor {
         let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
         exporter?.videoComposition = generateVideoComposition()
         exporter?.outputURL = outputUrl
-        exporter?.outputFileType = .mp4
+        exporter?.outputFileType = AVFileType.mp4
         
         print("🚀 [Exporter] M4 Media Engine Warming Up...")
         await exporter?.export()

@@ -14,12 +14,17 @@ class GPMFParser {
     func extractGPSData(from asset: AVAsset) async throws -> [GPSData] {
         print("🗺 [GPMF] Scanning asset for telemetry tracks...")
         let metadataTracks = try await asset.loadTracks(withMediaType: .metadata)
-        guard let gpmdTrack = metadataTracks.first(where: { track in
-            // FourCC 'gpmd' is the common GoPro metadata identifier
-            return track.formatDescriptions.contains { desc in
-                CMFormatDescriptionGetMediaSubType(desc as! CMFormatDescription) == 0x67706d64 // 'gpmd'
+        
+        var gpmdTrack: AVAssetTrack?
+        for track in metadataTracks {
+            let formats = try await track.load(.formatDescriptions)
+            if formats.contains(where: { CMFormatDescriptionGetMediaSubType($0) == 0x67706d64 }) {
+                gpmdTrack = track
+                break
             }
-        }) else {
+        }
+        
+        guard let finalTrack = gpmdTrack else {
             print("⚠️ [GPMF] No 'gpmd' track found.")
             return []
         }
@@ -27,7 +32,7 @@ class GPMFParser {
         print("🗺 [GPMF] Found GoPro Metadata track. Starting reader...")
         
         let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: gpmdTrack, outputSettings: nil)
+        let output = AVAssetReaderTrackOutput(track: finalTrack, outputSettings: nil)
         reader.add(output)
         reader.startReading()
         

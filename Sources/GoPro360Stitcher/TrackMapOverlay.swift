@@ -40,7 +40,6 @@ struct TrackMapOverlay {
     
     /// Renders the track map to an image
     func renderTrackImage(coordinates: [CLLocationCoordinate2D], size: CGSize) -> NSImage? {
-        let renderer = NSGraphicsContext.current
         let image = NSImage(size: size)
         
         image.lockFocus()
