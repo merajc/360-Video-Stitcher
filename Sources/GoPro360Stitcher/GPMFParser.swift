@@ -64,13 +64,13 @@ class GPMFParser {
     
     // Simple KLV parser looking for 'GPS5'
     private func parseGPMF(data: Data, pts: CMTime) -> [GPSData] {
-        var results: [GPSData] = []
+        let results: [GPSData] = []
         let gps5Key: [UInt8] = [0x47, 0x50, 0x53, 0x35] // "GPS5"
         
         var i = 0
         while i < data.count - 8 {
             let key = Array(data[i..<i+4])
-            let type = data[i+4]
+            let _ = data[i+4] // type (unused)
             let size = Int(data[i+5])
             let count = Int(UInt16(data[i+6]) << 8 | UInt16(data[i+7]))
             let totalPayloadSize = size * count

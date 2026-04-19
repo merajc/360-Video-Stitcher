@@ -20,23 +20,32 @@ class VideoProcessor: ObservableObject {
         
         print("📽 [Processor] Starting ingestion of \(urls.count) items...")
         
+        // 1. Handle security scoping for Mac URLs
+        let scopedUrls = urls.compactMap { url -> URL? in
+            if url.startAccessingSecurityScopedResource() {
+                return url
+            }
+            // If it's not a security scoped resource (e.g. local dev file), just return it
+            return url
+        }
+        
         do {
-            // 1. Filter out .LRV, .THM and keep only .360 files
-            let videoUrls = urls.filter { $0.pathExtension.lowercased() == "360" }
+            // 2. Filter out .LRV, .THM and keep only .360 files
+            let videoUrls = scopedUrls.filter { $0.pathExtension.lowercased() == "360" }
             print("📽 [Processor] Found \(videoUrls.count) valid .360 files.")
             guard !videoUrls.isEmpty else { 
                 print("⚠️ [Processor] No .360 files found. Aborting.")
                 return 
             }
             
-            // 2. Sort by creation date
+            // 3. Sort by creation date
             print("📽 [Processor] Sorting chapters by creation date...")
             let sortedUrls = try sortFilesByCreationDate(urls: videoUrls)
             for (idx, url) in sortedUrls.enumerated() {
                 print("   [\(idx)] \(url.lastPathComponent)")
             }
             
-            // 3. Setup virtual stitching via AVMutableComposition
+            // 4. Setup virtual stitching via AVMutableComposition
             print("📽 [Processor] Initializing virtual stitching...")
             try await stitchFiles(urls: sortedUrls)
             print("✅ [Processor] Virtual timeline ready.")
@@ -45,6 +54,8 @@ class VideoProcessor: ObservableObject {
             self.error = error
             print("❌ [Processor] Error processing files: \(error.localizedDescription)")
         }
+        
+        // Release security scoping later if needed, but for AVAsset it's safer to keep active during processing
     }
     
     private func sortFilesByCreationDate(urls: [URL]) throws -> [URL] {

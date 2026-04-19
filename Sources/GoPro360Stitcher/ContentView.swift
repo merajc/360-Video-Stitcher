@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PremiumButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -93,6 +94,18 @@ struct ContentView: View {
                             Text("Sequential files will be virtually stitched")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
+                            
+                            Button(action: {
+                                selectFiles()
+                            }) {
+                                Text("Select Files Manually")
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(Color.blue.opacity(0.2)))
+                                    .overlay(Capsule().stroke(Color.blue, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 10)
                         }
                         .padding(40)
                         .background(
@@ -167,6 +180,21 @@ struct ContentView: View {
                 await processor.processFiles(urls: urls)
             }
             return true
+        }
+    }
+    
+    private func selectFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "360")!]
+        
+        panel.begin { result in
+            if result == .OK {
+                Task {
+                    await processor.processFiles(urls: panel.urls)
+                }
+            }
         }
     }
     
