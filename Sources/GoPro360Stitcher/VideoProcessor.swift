@@ -6,6 +6,7 @@ import CoreLocation
 @Observable
 class VideoProcessor {
     var composition: AVMutableComposition?
+    var player: AVPlayer?
     var videoComposition: AVMutableVideoComposition?
     var isLoading: Bool = false
     var error: Error?
@@ -82,6 +83,7 @@ class VideoProcessor {
         
         // Save the composed virtual timeline
         self.composition = composition
+        self.player = AVPlayer(playerItem: AVPlayerItem(asset: composition))
     }
     
     func generateVideoComposition() -> AVVideoComposition? {

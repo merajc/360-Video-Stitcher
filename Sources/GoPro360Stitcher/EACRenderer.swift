@@ -6,6 +6,8 @@ class EACRenderer {
     var commandQueue: MTLCommandQueue!
     var computePipelineState: MTLComputePipelineState!
     
+    private var textureCache: CVMetalTextureCache?
+    
     init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue() else {
@@ -14,10 +16,12 @@ class EACRenderer {
         self.device = device
         self.commandQueue = commandQueue
         
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+        
         // Load default library
         guard let library = device.makeDefaultLibrary(),
-              let function = library.makeFunction(name: "eacToRectilinear") else {
-            print("Failed to load Metal shader eacToRectilinear")
+              let function = library.makeFunction(name: "renderStackedView") else {
+            print("Failed to load Metal shader renderStackedView")
             return nil
         }
         
@@ -29,7 +33,17 @@ class EACRenderer {
         }
     }
     
-    func render(inputTexture: MTLTexture, outputTexture: MTLTexture, pan: Float, tilt: Float, roll: Float, fov: Float = .pi / 2) {
+    func render(pixelBuffer: CVPixelBuffer, outputTexture: MTLTexture, pan: Float, tilt: Float, roll: Float, fov: Float = .pi / 2) {
+        guard let textureCache = textureCache else { return }
+        
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        var cvTexture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        
+        guard let cvTexture = cvTexture, let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
+        
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else {
             return
@@ -45,15 +59,12 @@ class EACRenderer {
         var fovRad = fov
         encoder.setBytes(&fovRad, length: MemoryLayout.size(ofValue: fovRad), index: 1)
         
-        let w = computePipelineState.threadExecutionWidth
-        let h = computePipelineState.maxTotalThreadsPerThreadgroup / w
-        let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
-        let threadsPerGrid = MTLSizeMake(outputTexture.width, outputTexture.height, 1)
+        let threadsPerThreadgroup = MTLSizeMake(16, 16, 1)
+        let threadsPerGrid = MTLSizeMake((outputTexture.width + 15) / 16 * 16, (outputTexture.height + 15) / 16 * 16, 1)
         
         encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
         encoder.endEncoding()
         
         commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
     }
 }
