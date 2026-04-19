@@ -15,22 +15,28 @@ class VideoProcessor {
     // Extracted metadata
     var extractedTelemetry: [CLLocationCoordinate2D] = []
     
-    func processFiles(urls: [URL]) async {
-        isLoading = true
-        defer { isLoading = false }
+        print("📽 [Processor] Starting ingestion of \(urls.count) items...")
         
         do {
             // 1. Filter out .LRV, .THM and keep only .360 files
             let videoUrls = urls.filter { $0.pathExtension.lowercased() == "360" }
-            guard !videoUrls.isEmpty else { return }
+            print("📽 [Processor] Found \(videoUrls.count) valid .360 files.")
+            guard !videoUrls.isEmpty else { 
+                print("⚠️ [Processor] No .360 files found. Aborting.")
+                return 
+            }
             
             // 2. Sort by creation date
+            print("📽 [Processor] Sorting chapters by creation date...")
             let sortedUrls = try sortFilesByCreationDate(urls: videoUrls)
+            for (idx, url) in sortedUrls.enumerated() {
+                print("   [\(idx)] \(url.lastPathComponent)")
+            }
             
             // 3. Setup virtual stitching via AVMutableComposition
+            print("📽 [Processor] Initializing virtual stitching...")
             try await stitchFiles(urls: sortedUrls)
-            
-        } catch {
+            print("✅ [Processor] Virtual timeline ready.")
             self.error = error
             print("Error processing files: \(error.localizedDescription)")
         }
@@ -64,11 +70,13 @@ class VideoProcessor {
         var currentTime = CMTime.zero
         
         for url in urls {
+            print("📽 [Stitcher] Processing chapter: \(url.lastPathComponent)")
             let asset = AVURLAsset(url: url)
             
             // We use Swift Concurrency to load tracks
             guard let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first,
                   let assetAudioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+                print("❌ [Stitcher] Failed to load tracks for \(url.lastPathComponent)")
                 continue
             }
             
@@ -78,6 +86,8 @@ class VideoProcessor {
             try videoTrack.insertTimeRange(timeRange, of: assetVideoTrack, at: currentTime)
             try audioTrack.insertTimeRange(timeRange, of: assetAudioTrack, at: currentTime)
             
+            print("📽 [Stitcher]   - Appended \(String(format: "%.2f", duration.seconds))s at \(String(format: "%.2f", currentTime.seconds))s")
+            
             // Accumulate duration for next chapter
             currentTime = CMTimeAdd(currentTime, duration)
         }
@@ -85,6 +95,7 @@ class VideoProcessor {
         // Save the composed virtual timeline
         self.composition = composition
         self.player = AVPlayer(playerItem: AVPlayerItem(asset: composition))
+        print("✅ [Stitcher] Composition complete. Total duration: \(String(format: "%.2f", currentTime.seconds))s")
     }
     
     func generateVideoComposition() -> AVVideoComposition? {
@@ -110,16 +121,22 @@ class VideoProcessor {
     
     func exportVideo(to outputUrl: URL) async throws {
         guard let composition = composition else { return }
+        print("🚀 [Exporter] Starting export to \(outputUrl.path)...")
         
         let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
         exporter?.videoComposition = generateVideoComposition()
         exporter?.outputURL = outputUrl
         exporter?.outputFileType = .mp4
         
+        print("🚀 [Exporter] M4 Media Engine Warming Up...")
         await exporter?.export()
         
         if exporter?.status == .failed {
-            throw exporter?.error ?? NSError(domain: "ExportError", code: -1)
+            let err = exporter?.error ?? NSError(domain: "ExportError", code: -1)
+            print("❌ [Exporter] Export failed: \(err.localizedDescription)")
+            throw err
         }
+        
+        print("✅ [Exporter] Export successful!")
     }
 }

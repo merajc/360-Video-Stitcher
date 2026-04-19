@@ -12,6 +12,7 @@ struct GPSData {
 class GPMFParser {
     /// Extracts GPS5 data from a GoPro metadata track
     func extractGPSData(from asset: AVAsset) async throws -> [GPSData] {
+        print("🗺 [GPMF] Scanning asset for telemetry tracks...")
         let metadataTracks = try await asset.loadTracks(withMediaType: .metadata)
         guard let gpmdTrack = metadataTracks.first(where: { track in
             // FourCC 'gpmd' is the common GoPro metadata identifier
@@ -19,17 +20,23 @@ class GPMFParser {
                 CMFormatDescriptionGetMediaSubType(desc as! CMFormatDescription) == 0x67706d64 // 'gpmd'
             }
         }) else {
+            print("⚠️ [GPMF] No 'gpmd' track found.")
             return []
         }
+        
+        print("🗺 [GPMF] Found GoPro Metadata track. Starting reader...")
         
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(track: gpmdTrack, outputSettings: nil)
         reader.add(output)
         reader.startReading()
         
+        print("🗺 [GPMF] Processing sample buffers...")
         var allGPSData: [GPSData] = []
+        var sampleCount = 0
         
         while let sampleBuffer = output.copyNextSampleBuffer() {
+            sampleCount += 1
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
             
@@ -46,6 +53,7 @@ class GPMFParser {
             }
         }
         
+        print("✅ [GPMF] Extraction finished. Processed \(sampleCount) blocks, found \(allGPSData.count) GPS points.")
         return allGPSData
     }
     

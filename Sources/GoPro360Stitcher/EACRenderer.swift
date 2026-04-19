@@ -9,8 +9,10 @@ class EACRenderer {
     private var textureCache: CVMetalTextureCache?
     
     init?() {
+        print("🎨 [Renderer] Initializing Metal Pipeline...")
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue() else {
+            print("❌ [Renderer] Failed to create Metal Device or Command Queue.")
             return nil
         }
         self.device = device
@@ -22,21 +24,24 @@ class EACRenderer {
         var library: MTLLibrary?
         if let shaderURL = Bundle.module.url(forResource: "EACShader", withExtension: "metal"),
            let shaderSource = try? String(contentsOf: shaderURL) {
+            print("🎨 [Renderer] Found EACShader.metal in bundle. Compiling...")
             library = try? device.makeLibrary(source: shaderSource, options: nil)
         } else {
+            print("🎨 [Renderer] Shader resource not found, falling back to default library.")
             library = device.makeDefaultLibrary()
         }
         
         guard let finalLibrary = library,
               let function = finalLibrary.makeFunction(name: "renderStackedView") else {
-            print("Failed to load Metal shader renderStackedView")
+            print("❌ [Renderer] Failed to load Metal function 'renderStackedView'")
             return nil
         }
         
         do {
             self.computePipelineState = try device.makeComputePipelineState(function: function)
+            print("✅ [Renderer] Metal Engine Ready.")
         } catch {
-            print("Compute pipeline error: \(error)")
+            print("❌ [Renderer] Pipeline state error: \(error)")
             return nil
         }
     }
