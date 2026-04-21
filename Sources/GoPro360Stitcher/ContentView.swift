@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AVKit
 
 struct PremiumButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -40,12 +41,72 @@ struct ControlSlider: View {
     }
 }
 
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+    
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .none
+        view.videoGravity = .resizeAspectFill
+        return view
+    }
+    
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {}
+}
+
+struct Seekbar: View {
+    @ObservedObject var processor: VideoProcessor
+    @State private var isDragging = false
+    @State private var dragValue: Double = 0
+    
+    let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Slider(value: Binding(get: {
+                isDragging ? dragValue : (processor.player?.currentTime().seconds ?? 0)
+            }, set: { newValue in
+                dragValue = newValue
+                isDragging = true
+                processor.player?.seek(to: CMTime(seconds: newValue, preferredTimescale: 600))
+            }), in: 0...(processor.composition?.duration.seconds ?? 1)) {
+                Text("Seek bar")
+            } onEditingChanged: { editing in
+                isDragging = editing
+            }
+            .tint(.blue)
+            
+            HStack {
+                Text(formatTime(isDragging ? dragValue : (processor.player?.currentTime().seconds ?? 0)))
+                Spacer()
+                Text(formatTime(processor.composition?.duration.seconds ?? 1))
+            }
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundColor(.secondary)
+        }
+        .onReceive(timer) { _ in
+            // Force view refresh to update timeline text
+            if !isDragging {
+                // Just trigger re-render
+            }
+        }
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%02d:%02d", mins, secs)
+    }
+}
+
 struct ContentView: View {
-    @State private var pan: Double = 0
-    @State private var tilt: Double = 0
-    @State private var roll: Double = 0
     @State private var isTargeted = false
     @StateObject private var processor = VideoProcessor()
+    @State private var showTrackMap = true
+    @State private var currentTime: Double = 0
+    
+    let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ZStack {
@@ -59,28 +120,78 @@ struct ContentView: View {
                         VStack(spacing: 20) {
                             ProgressView()
                                 .scaleEffect(1.5)
-                            Text("Engine Initializing...")
+                            Text(processor.isExporting ? "Rendering Video..." : "Engine Initializing...")
                                 .font(.headline)
                                 .italic()
-                        }
-                    } else if processor.composition != nil {
-                        // The actual video preview will go here
-                        ZStack {
-                            Rectangle()
-                                .fill(Color.black)
                             
-                            VStack(spacing: 2) {
-                                Text("FRONT VIEW (0°)")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.5))
-                                Spacer()
-                                Divider().background(Color.white.opacity(0.2))
-                                Spacer()
-                                Text("REAR VIEW (180°)")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.5))
+                            if processor.isExporting {
+                                VStack(spacing: 8) {
+                                    ProgressView(value: processor.exportProgress, total: 1.0)
+                                        .progressViewStyle(.linear)
+                                        .frame(width: 200)
+                                    Text("\(Int(processor.exportProgress * 100))%")
+                                        .font(.caption.monospaced())
+                                }
                             }
-                            .padding()
+                        }
+                    } else if let player = processor.player {
+                        VStack(spacing: 20) {
+                            // 9:16 Viewport
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.black)
+                                    .shadow(color: .black.opacity(0.5), radius: 20)
+                                
+                                PlayerView(player: player)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                
+                                // Viewport Guide Overlay
+                                VStack {
+                                    HStack {
+                                        Text("9:16 EAC SPHERICAL")
+                                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                                            .padding(6)
+                                            .background(Color.black.opacity(0.6))
+                                            .cornerRadius(6)
+                                        Spacer()
+                                        
+                                        if showTrackMap {
+                                            TrackMapView(telemetry: processor.telemetry, currentTime: currentTime)
+                                                .frame(width: 100, height: 100)
+                                                .background(Color.black.opacity(0.3))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                                        }
+                                    }
+                                    Spacer()
+                                }
+                                .padding(10)
+                            }
+                            .aspectRatio(9/16, contentMode: .fit)
+                            .frame(maxHeight: 700) // Constrain height to keep it manageable
+                            .padding(.top, 40)
+                            .padding(.bottom, 20)
+                            
+                            // Seekbar
+                            Seekbar(processor: processor)
+                                .frame(width: 400)
+                                .padding(.bottom, 40)
+                        }
+                    } else if processor.isExporting {
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Rendering Video...")
+                                .font(.headline)
+                            
+                            VStack(spacing: 8) {
+                                ProgressView(value: processor.exportProgress, total: 1.0)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 300)
+                                Text("\(Int(processor.exportProgress * 100))%")
+                                    .font(.title3.monospaced())
+                                    .bold()
+                            }
                         }
                     } else {
                         VStack(spacing: 15) {
@@ -119,53 +230,83 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 
                 // Sidebar Controls
-                VStack(alignment: .leading, spacing: 25) {
-                    Text("360 REFRAMING")
-                        .font(.system(.caption, design: .rounded))
-                        .kerning(2)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 10)
-                    
-                    ControlSlider(label: "PAN", value: $pan, range: -180...180, unit: "°")
-                    ControlSlider(label: "TILT", value: $tilt, range: -90...90, unit: "°")
-                    ControlSlider(label: "ROLL", value: $roll, range: -180...180, unit: "°")
-                    
-                    Divider().padding(.vertical, 10)
-                    
-                    Text("OVERLAYS")
-                        .font(.system(.caption, design: .rounded))
-                        .kerning(2)
-                        .foregroundColor(.secondary)
-                    
-                    Toggle("GPS TRACK MAP", isOn: .constant(true))
-                        .toggleStyle(SwitchToggleStyle(tint: .blue))
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        exportVideo()
-                    }) {
-                        HStack {
-                            Image(systemName: "square.and.arrow.up")
-                            Text("GENERATE 9:16 VIDEO")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 25) {
+                        // TOP VIEW SECTION
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("TOP VIEW (TRACK)")
+                                .font(.system(.caption, design: .rounded))
+                                .kerning(2)
+                                .foregroundColor(.blue)
                                 .bold()
+                            
+                            ControlSlider(label: "PAN", value: $processor.topPan, range: -180...180, unit: "°")
+                            ControlSlider(label: "TILT", value: $processor.topTilt, range: -90...90, unit: "°")
+                            ControlSlider(label: "ROLL", value: $processor.topRoll, range: -180...180, unit: "°")
+                            ControlSlider(label: "ZOOM", value: $processor.topFOV, range: 40...160, unit: "°")
                         }
-                        .frame(maxWidth: .infinity)
+                        .padding(.top, 10)
+                        
+                        Divider().opacity(0.2)
+                        
+                        // BOTTOM VIEW SECTION
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("BOTTOM VIEW (DRIVER)")
+                                .font(.system(.caption, design: .rounded))
+                                .kerning(2)
+                                .foregroundColor(.purple)
+                                .bold()
+                            
+                            ControlSlider(label: "PAN", value: $processor.bottomPan, range: -180...180, unit: "°")
+                            ControlSlider(label: "TILT", value: $processor.bottomTilt, range: -90...90, unit: "°")
+                            ControlSlider(label: "ROLL", value: $processor.bottomRoll, range: -180...180, unit: "°")
+                            ControlSlider(label: "ZOOM", value: $processor.bottomFOV, range: 40...160, unit: "°")
+                        }
+                        
+                        Divider().opacity(0.2)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("OVERLAYS")
+                                .font(.system(.caption, design: .rounded))
+                                .kerning(2)
+                                .foregroundColor(.secondary)
+                            
+                            Toggle("GPS TRACK MAP", isOn: $showTrackMap)
+                                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                        }
+                        
+                        Spacer(minLength: 40)
+                        
+                        Button(action: {
+                            exportVideo()
+                        }) {
+                            HStack {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("GENERATE 9:16 VIDEO")
+                                    .bold()
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PremiumButtonStyle())
+                        .disabled(processor.composition == nil)
+                        
+                        Text("M4 MEDIA ENGINE ACTIVE")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.green.opacity(0.8))
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(PremiumButtonStyle())
-                    .disabled(processor.composition == nil)
-                    
-                    Text("M4 MEDIA ENGINE ACTIVE")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.green.opacity(0.8))
-                        .frame(maxWidth: .infinity)
+                    .padding(20)
                 }
-                .padding(20)
-                .frame(width: 280)
+                .frame(width: 300)
                 .background(
                     VisualEffect(material: .sidebar, blendingMode: .withinWindow)
                         .ignoresSafeArea()
                 )
+            }
+        }
+        .onReceive(timer) { _ in
+            if let p = processor.player {
+                currentTime = p.currentTime().seconds
             }
         }
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in

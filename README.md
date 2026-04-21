@@ -1,55 +1,51 @@
-# GoPro 360 Stitcher (Apple Silicon Optimized)
+# GoPro 360 Stitcher (Apple Silicon M4 Optimized)
 
-A high-performance, native macOS application designed for GoPro MAX `.360` files. This app provides a seamless, M4-optimized pipeline for virtually stitching chaptered files, real-time reframing via Metal-accelerated EAC projection, and telemetry-overlayed exports.
+A high-performance native macOS application designed to ingest, stitch, reframe, and export GoPro MAX `.360` files directly on Apple Silicon.
 
-## 🌟 Key Features
+## 🚀 Native Architecture
+- **Language:** Swift 6 (Strict Concurrency)
+- **UI:** SwiftUI
+- **Processing:** AVFoundation + Metal Compute Shaders
+- **Optimization:** M4 Media Engine (Hardware HEVC Encoding)
 
-- **Virtual Stitching**: Chunks chaptered `.360` files (e.g., `GS010001.360`, `GS010002.360`) into a single continuous timeline using `AVMutableComposition` without intermediate disk writes.
-- **Metal 3 Projection Engine**: Uses a custom compute shader (`EACShader.metal`) to transform Equi-Angular Cubemap (EAC) footage into rectilinear projection in real-time.
-- **Stacked Dual-View**: Automatically generates a 9:16 vertical video with a Front-view (0°) and Rear-view (180°) stacked layout.
-- **GPMF Telemetry Extraction**: Parses embedded GoPro metadata tracks (`gpmd`) to extract GPS coordinates and draw a 2D track map overlay.
-- **M4 Media Engine Acceleration**: Built to utilize the latest Apple Silicon hardware for ultra-fast HEVC/H.265 encoding via `AVAssetExportSession`.
-- **Glassmorphic UI**: A premium, "Swiftly" native SwiftUI interface with animated reframe controls (Pan, Tilt, Roll).
+## ✨ Key Features
+- **Virtual Stitching:** Automatically identifies and sequentializes chaptered GoPro `.360` files without re-encoding until final export.
+- **Dual-Track Processing:** Extracts both Front and Rear hemispherical video tracks from the GoPro container.
+- **EAC Projection:** Uses a custom Metal-based Equi-Angular Cubemap (EAC) compositor to project spherical footage into rectilinear frames.
+- **Vertical Stack Export:** Produces a 9:16 vertical video containing a stacked view of both Front and Rear cameras, perfect for social media or track-day analysis.
+- **Telemetry Integration:** Stub exists for GPMF telemetry extraction to draw GPS track maps (Work in progress).
 
-## 🚀 How It Works
+## 🛠 Symlink Workaround
+Since `AVFoundation` does not natively recognize the `.360` file extension as a valid media container, this application implements a robust **Symlink Proxy Strategy**:
+1. Files are selected via Drag & Drop or File Picker.
+2. The app creates a temporary `.mp4` symlink for each `.360` file in the system temp directory.
+3. `AVURLAsset` consumes the symlink, successfully bypassing extension-based format checks while maintaining zero-copy data access.
 
-### 1. Ingestion & Sorting
-Files are dropped into the app. The `VideoProcessor` filters for `.360` files and automatically sorts them by creation date to reconstruct the sequence of chapters correctly.
+## 🏃 Running the App
+### Prerequisites
+- macOS 14.0+ (Sonoma or later)
+- Xcode 15+ (or Swift Command Line Tools)
+- Apple Silicon (M4 recommended for peak performance)
 
-### 2. Virtual Composition
-Instead of merging files on disk (which takes time and space), we create an `AVMutableComposition`. This is a "virtual file" that points to the data in the original files, allowing instant playback across chapter boundaries.
+### Build
+```bash
+make build
+```
 
-### 3. EAC Geometry Transform
-GoPro MAX files are stored in EAC format. Our Metal renderer samples this input, applies Pan/Tilt/Roll rotations, and projects it onto a flat plane. The vertical stack is created by sampling the spherical data twice: once for the front 180° and once for the rear 180°.
+### Run
+```bash
+make run
+```
 
-### 4. Telemetry Parsing
-The `GPMFParser` looks for the `gpmd` track in the video containers. It parses the KLV (Key-Length-Value) blocks to find `GPS5` data. This data is then normalized and passed to `TrackMapOverlay` to render a 2D path using Core Graphics.
-
-## 🛠 Build & Development
-
-This project is configured to build entirely from the terminal, avoiding heavy Xcode dependencies.
-
-### Requirements:
-- macOS (Apple Silicon recommended)
-- Swift 6.0+
-
-### Usage:
-1. **Build**: `make build`
-2. **Run**: `make run`
-3. **Clean**: `make clean`
+### Headless End-to-End Test
+To verify the engine without the UI:
+```bash
+./.build/release/GoPro360Stitcher --test-file "/path/to/your/file.360"
+```
 
 ## 📂 Project Structure
-
-- `Sources/GoPro360Stitcher/`
-  - `GoPro360StitcherApp.swift`: App Entry point.
-  - `ContentView.swift`: Main UI and Glassmorphic controls.
-  - `VideoProcessor.swift`: AVFoundation logic for stitching and export.
-  - `EACRenderer.swift`: Metal host logic.
-  - `Shaders/EACShader.metal`: Compute shader for 360 projection.
-  - `GPMFParser.swift`: GoPro Metadata track parser.
-  - `TrackMapOverlay.swift`: GPS path rendering.
-- `Package.swift`: Swift Package Manager configuration.
-- `Makefile`: Terminal-based build commands.
-
----
-Created by Antigravity for high-performance GoPro workflows.
+- `VideoProcessor.swift`: The engine that manages the virtual timeline and export session.
+- `EACCompositor.swift`: Custom `AVVideoCompositing` class that bridges AVFoundation to Metal.
+- `EACRenderer.swift`: Metal pipeline manager that handles textures and compute encoders.
+- `EACShader.metal`: High-performance compute shader for spherical-to-rectilinear projection.
+- `GPMFParser.swift`: Telemetry extraction logic.

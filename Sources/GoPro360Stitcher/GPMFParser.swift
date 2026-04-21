@@ -10,13 +10,41 @@ struct GPSData {
 }
 
 class GPMFParser {
+    /// Overload that handles .360 extension issues
+    func extractGPSData(from url: URL) async -> [GPSData] {
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempUrl = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mp4")
+        
+        do {
+            try FileManager.default.createSymbolicLink(at: tempUrl, withDestinationURL: url)
+        } catch {
+            print("⚠️ [GPMF] Failed to create symlink: \(error.localizedDescription)")
+        }
+        
+        let assetUrl = FileManager.default.fileExists(atPath: tempUrl.path) ? tempUrl : url
+        let asset = AVURLAsset(url: assetUrl)
+        
+        defer {
+            if assetUrl != url {
+                try? FileManager.default.removeItem(at: assetUrl)
+            }
+        }
+        
+        do {
+            return try await extractGPSData(from: asset)
+        } catch {
+            print("❌ [GPMF] Error: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Extracts GPS5 data from a GoPro metadata track
     func extractGPSData(from asset: AVAsset) async throws -> [GPSData] {
         print("🗺 [GPMF] Scanning asset for telemetry tracks...")
-        let metadataTracks = try await asset.loadTracks(withMediaType: .metadata)
+        let tracks = try await asset.load(.tracks)
         
         var gpmdTrack: AVAssetTrack?
-        for track in metadataTracks {
+        for track in tracks {
             let formats = try await track.load(.formatDescriptions)
             if formats.contains(where: { CMFormatDescriptionGetMediaSubType($0) == 0x67706d64 }) {
                 gpmdTrack = track

@@ -46,38 +46,52 @@ class EACRenderer {
         }
     }
     
-    func render(pixelBuffer: CVPixelBuffer, outputTexture: MTLTexture, pan: Float, tilt: Float, roll: Float, fov: Float = .pi / 2) {
-        guard let textureCache = textureCache else { return }
-        
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        
-        var cvTexture: CVMetalTexture?
-        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        
-        guard let cvTexture = cvTexture, let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
-        
+    func renderStacked(front: CVPixelBuffer, rear: CVPixelBuffer, to output: CVPixelBuffer, topParams: SIMD4<Float>, bottomParams: SIMD4<Float>) {
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            return
-        }
+              let encoder = commandBuffer.makeComputeCommandEncoder(),
+              let textureOutput = makeTexture(from: output),
+              let textureFront = makeTexture(from: front),
+              let textureRear = makeTexture(from: rear) else { return }
         
         encoder.setComputePipelineState(computePipelineState)
-        encoder.setTexture(inputTexture, index: 0)
-        encoder.setTexture(outputTexture, index: 1)
         
-        var eulerAngles = SIMD3<Float>(tilt * .pi/180, pan * .pi/180, roll * .pi/180)
-        encoder.setBytes(&eulerAngles, length: MemoryLayout.size(ofValue: eulerAngles), index: 0)
+        // Convert degrees to radians for the shader
+        var tParams = topParams
+        tParams.x *= .pi/180 // tilt
+        tParams.y *= .pi/180 // pan
+        tParams.z *= .pi/180 // roll
+        tParams.w *= .pi/180 // fov
         
-        var fovRad = fov
-        encoder.setBytes(&fovRad, length: MemoryLayout.size(ofValue: fovRad), index: 1)
+        var bParams = bottomParams
+        bParams.x *= .pi/180 // tilt
+        bParams.y *= .pi/180 // pan
+        bParams.z *= .pi/180 // roll
+        bParams.w *= .pi/180 // fov
+        
+        encoder.setBytes(&tParams, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+        encoder.setBytes(&bParams, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
+        
+        encoder.setTexture(textureFront, index: 0)
+        encoder.setTexture(textureRear, index: 1)
+        encoder.setTexture(textureOutput, index: 2)
         
         let threadsPerThreadgroup = MTLSizeMake(16, 16, 1)
-        let threadsPerGrid = MTLSizeMake((outputTexture.width + 15) / 16 * 16, (outputTexture.height + 15) / 16 * 16, 1)
+        let threadsPerGrid = MTLSizeMake(textureOutput.width, textureOutput.height, 1)
         
         encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
         encoder.endEncoding()
         
         commandBuffer.commit()
+    }
+    
+    private func makeTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
+        guard let textureCache = textureCache else { return nil }
+        var texture: CVMetalTexture?
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        CVMetalTextureCacheCreateTextureFromImage(nil, textureCache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &texture)
+        guard let texture = texture else { return nil }
+        return CVMetalTextureGetTexture(texture)
     }
 }
