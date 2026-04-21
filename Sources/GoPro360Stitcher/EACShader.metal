@@ -55,13 +55,13 @@ EACResult worldDirToEAC(float3 dir) {
             u_face = 1; v_face = 1; rot = 1; // ROT_90
         }
     } else if (aDir.y >= aDir.x && aDir.y >= aDir.z) {
-        if (dir.y > 0.0) {
-            // UP
+        if (dir.y < 0.0) {
+            // UP (Mapped to GoPro's u_face=2)
             uv.x = -dir.x / dir.y;
             uv.y = -dir.z / dir.y;
             u_face = 2; v_face = 1; rot = 3; // ROT_270
         } else {
-            // DOWN
+            // DOWN (Mapped to GoPro's u_face=0)
             uv.x = dir.x / dir.y;
             uv.y = -dir.z / dir.y;
             u_face = 0; v_face = 1; rot = 3; // ROT_270

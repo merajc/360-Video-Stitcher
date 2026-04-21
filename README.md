@@ -10,9 +10,12 @@ A high-performance native macOS application designed to ingest, stitch, reframe,
 
 ## ✨ Key Features
 - **Virtual Stitching:** Automatically identifies and sequentializes chaptered GoPro `.360` files without re-encoding until final export.
-- **Dual-Track Processing:** Extracts both Front and Rear hemispherical video tracks from the GoPro container.
-- **EAC Projection:** Uses a custom Metal-based Equi-Angular Cubemap (EAC) compositor to project spherical footage into rectilinear frames.
-- **Vertical Stack Export:** Produces a 9:16 vertical video containing a stacked view of both Front and Rear cameras, perfect for social media or track-day analysis.
+- **Dual-Track Decoding:** Extracts both Track 0 (Front Lens) and Track 5 (Back Lens) spherical video tracks from the `.360` container.
+- **Pixel-Perfect EAC Unwarping:** Features a highly optimized Metal compute shader that precisely mirrors the official GoPro MAX Equi-Angular Cubemap (EAC) algebra.
+  - Automatically handles the proprietary 3x2 face atlas mapping (with tracks split).
+  - Handles the complex `ROT_90` and `ROT_270` mappings to correct the Rear, Top, and Bottom faces without geometric folding.
+  - Perfectly aligns the 64-pixel seam overlaps at exactly `x=688` and `x=3280` cuts.
+- **Interactive 360 Viewer:** Produces a seamless spherical view of the 360 world with Pan, Tilt, Roll, and Zoom controls.
 - **Telemetry Integration:** Stub exists for GPMF telemetry extraction to draw GPS track maps (Work in progress).
 
 ## 🛠 Symlink Workaround
