@@ -2,12 +2,21 @@ import SwiftUI
 
 struct TelemetryDashboardView: View {
     @ObservedObject var telemetry: TelemetryProcessor
+    var showSpeed: Bool = true
+    var showAltitude: Bool = true
+    var showGForce: Bool = true
     
     var body: some View {
         HStack(spacing: 16) {
-            TelemetryGauge(title: "SPEED", value: telemetry.currentSpeed, unit: "km/h", maxValue: 200)
-            TelemetryGauge(title: "ALTITUDE", value: telemetry.currentAltitude, unit: "m", maxValue: 3000)
-            TelemetryGauge(title: "G-FORCE", value: telemetry.currentGForce, unit: "G", maxValue: 3)
+            if showSpeed {
+                TelemetryGauge(title: "SPEED", value: telemetry.currentSpeed, unit: "km/h", maxValue: 200)
+            }
+            if showAltitude {
+                TelemetryGauge(title: "ALTITUDE", value: telemetry.currentAltitude, unit: "m", maxValue: 3000)
+            }
+            if showGForce {
+                TelemetryGauge(title: "G-FORCE", value: telemetry.currentGForce, unit: "G", maxValue: 3)
+            }
         }
         .padding(12)
         .background(.ultraThinMaterial)

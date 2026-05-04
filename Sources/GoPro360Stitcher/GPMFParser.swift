@@ -27,8 +27,9 @@ class GPMFParser {
         
         for sample in samples {
             if let data = parser.readSampleData(sample: sample) {
-                // Parse the payload block
-                let blockGPS = parseGPMF(data: data, pts: currentTime)
+                // Parse the payload block, passing block duration for timestamp interpolation
+                let blockDuration = CMTime(value: Int64(sample.duration), timescale: Int32(timescale))
+                let blockGPS = parseGPMF(data: data, pts: currentTime, blockDuration: blockDuration)
                 allGPSData.append(contentsOf: blockGPS)
             }
             currentTime = CMTimeAdd(currentTime, CMTime(value: Int64(sample.duration), timescale: Int32(timescale)))
@@ -38,7 +39,7 @@ class GPMFParser {
         return allGPSData
     }
     
-    private func parseGPMF(data: Data, pts: CMTime) -> [GPSData] {
+    private func parseGPMF(data: Data, pts: CMTime, blockDuration: CMTime) -> [GPSData] {
         var results: [GPSData] = []
         
         // GPMF is KLV: Key(4), Type(1), Size(1), Count(2) -> 8 bytes
@@ -90,9 +91,12 @@ class GPMFParser {
                                 let fspeed = Double(speed2d) / Double(currentScales[3])
                                 let fspeed3d = Double(speed3d) / Double(currentScales[4])
                                 
-                                // Map all block samples to the block's PTS for simplicity
+                                // Interpolate timestamp within the block so each sample gets a distinct time
+                                let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
+                                let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
+                                
                                 let gpsData = GPSData(
-                                    timestamp: pts,
+                                    timestamp: sampleTime,
                                     coordinate: CLLocationCoordinate2D(latitude: flat, longitude: flon),
                                     altitude: falt,
                                     speed: fspeed,

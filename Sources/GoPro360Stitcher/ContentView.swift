@@ -105,6 +105,9 @@ struct ContentView: View {
     @StateObject private var processor = VideoProcessor()
     @State private var showTrackMap = true
     @State private var showTelemetryDashboard = true
+    @State private var showSpeedGauge = true
+    @State private var showAltitudeGauge = true
+    @State private var showGForceGauge = true
     @State private var currentTime: Double = 0
     
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
@@ -172,7 +175,12 @@ struct ContentView: View {
                                     }
                                     Spacer()
                                     if showTelemetryDashboard && !processor.telemetry.trackPoints.isEmpty {
-                                        TelemetryDashboardView(telemetry: processor.telemetry)
+                                        TelemetryDashboardView(
+                                            telemetry: processor.telemetry,
+                                            showSpeed: showSpeedGauge,
+                                            showAltitude: showAltitudeGauge,
+                                            showGForce: showGForceGauge
+                                        )
                                             .padding(.bottom, 20)
                                     }
                                 }
@@ -313,6 +321,21 @@ struct ContentView: View {
                                 
                             Toggle("TELEMETRY DASHBOARD", isOn: $showTelemetryDashboard)
                                 .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            
+                            if showTelemetryDashboard {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Toggle("Speed", isOn: $showSpeedGauge)
+                                        .toggleStyle(SwitchToggleStyle(tint: .cyan))
+                                        .font(.caption)
+                                    Toggle("Altitude", isOn: $showAltitudeGauge)
+                                        .toggleStyle(SwitchToggleStyle(tint: .cyan))
+                                        .font(.caption)
+                                    Toggle("G-Force", isOn: $showGForceGauge)
+                                        .toggleStyle(SwitchToggleStyle(tint: .cyan))
+                                        .font(.caption)
+                                }
+                                .padding(.leading, 12)
+                            }
                         }
                         
                         Spacer(minLength: 20)

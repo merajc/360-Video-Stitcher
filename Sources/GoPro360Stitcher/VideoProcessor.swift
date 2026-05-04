@@ -134,15 +134,37 @@ class VideoProcessor: ObservableObject {
             print("📽 [Processor] Initializing virtual stitching...")
             try await stitchFiles(urls: sortedUrls)
             
-            // 5. Extract GPS Telemetry
-            if let firstUrl = sortedUrls.first {
-                print("📽 [Processor] Extracting telemetry from \(firstUrl.lastPathComponent)...")
-                let parser = GPMFParser()
-                let points = await parser.extractGPSData(from: firstUrl)
-                self.telemetry.loadTelemetry(points)
-                self.extractedTelemetry = points.map { $0.coordinate }
-                print("✅ [Processor] Extracted \(points.count) GPS points.")
+            // 5. Extract GPS Telemetry from ALL chapters
+            let parser = GPMFParser()
+            var allPoints: [GPSData] = []
+            var timeOffset: Double = 0.0
+            
+            for url in sortedUrls {
+                print("📽 [Processor] Extracting telemetry from \(url.lastPathComponent)...")
+                let chapterPoints = await parser.extractGPSData(from: url)
+                
+                // Offset timestamps so they're continuous across chapters
+                let offsetPoints = chapterPoints.map { point in
+                    GPSData(
+                        timestamp: CMTimeAdd(point.timestamp, CMTime(seconds: timeOffset, preferredTimescale: 600)),
+                        coordinate: point.coordinate,
+                        altitude: point.altitude,
+                        speed: point.speed,
+                        speed3D: point.speed3D
+                    )
+                }
+                allPoints.append(contentsOf: offsetPoints)
+                
+                // Advance time offset by this chapter's duration
+                if let lastPt = chapterPoints.last {
+                    timeOffset += lastPt.timestamp.seconds
+                }
+                print("   ↳ \(chapterPoints.count) points (offset: \(String(format: "%.1f", timeOffset))s)")
             }
+            
+            self.telemetry.loadTelemetry(allPoints)
+            self.extractedTelemetry = allPoints.map { $0.coordinate }
+            print("✅ [Processor] Total telemetry: \(allPoints.count) GPS points across \(sortedUrls.count) chapters.")
             
             print("✅ [Processor] Virtual timeline ready.")
             
