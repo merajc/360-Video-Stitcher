@@ -101,12 +101,22 @@ class GPMFParser {
                 } else {
                     let typeChar = String(bytes: [type], encoding: .ascii) ?? "?"
                     
-                    if keyStr == "SCAL" && (typeChar == "l" || typeChar == "L") && size == 4 {
+                    if keyStr == "SCAL" {
                         currentScales = []
-                        for j in 0..<count {
-                            let start = i + j * 4
-                            let scale = data[start..<start+4].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
-                            currentScales.append(scale)
+                        if (typeChar == "l" || typeChar == "L") && size == 4 {
+                            // Int32 scales (used by GPS5)
+                            for j in 0..<count {
+                                let start = i + j * 4
+                                let scale = data[start..<start+4].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                currentScales.append(scale)
+                            }
+                        } else if (typeChar == "s" || typeChar == "S") && size == 2 {
+                            // Int16 scales (used by ACCL, GYRO)
+                            for j in 0..<count {
+                                let start = i + j * 2
+                                let scale = data[start..<start+2].withUnsafeBytes { $0.loadUnaligned(as: Int16.self).bigEndian }
+                                currentScales.append(Int32(scale))
+                            }
                         }
                     }
                     

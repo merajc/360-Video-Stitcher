@@ -143,23 +143,32 @@ class VideoProcessor: ObservableObject {
                 print("📽 [Processor] Extracting telemetry from \(url.lastPathComponent)...")
                 let chapterPoints = await parser.extractGPSData(from: url)
                 
-                // Offset timestamps so they're continuous across chapters
+                // Offset timestamps so they're continuous across the stitched composition
                 let offsetPoints = chapterPoints.map { point in
-                    GPSData(
+                    var offsetPoint = GPSData(
                         timestamp: CMTimeAdd(point.timestamp, CMTime(seconds: timeOffset, preferredTimescale: 600)),
                         coordinate: point.coordinate,
                         altitude: point.altitude,
                         speed: point.speed,
                         speed3D: point.speed3D
                     )
+                    offsetPoint.accelX = point.accelX
+                    offsetPoint.accelY = point.accelY
+                    offsetPoint.accelZ = point.accelZ
+                    return offsetPoint
                 }
                 allPoints.append(contentsOf: offsetPoints)
                 
-                // Advance time offset by this chapter's duration
-                if let lastPt = chapterPoints.last {
-                    timeOffset += lastPt.timestamp.seconds
-                }
-                print("   ↳ \(chapterPoints.count) points (offset: \(String(format: "%.1f", timeOffset))s)")
+                // Use actual video duration for time offset (matches composition timeline)
+                let tempDir = FileManager.default.temporaryDirectory
+                let tempUrl = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mp4")
+                try? FileManager.default.createSymbolicLink(at: tempUrl, withDestinationURL: url)
+                let asset = AVURLAsset(url: FileManager.default.fileExists(atPath: tempUrl.path) ? tempUrl : url)
+                let duration = try await asset.load(.duration)
+                timeOffset += duration.seconds
+                try? FileManager.default.removeItem(at: tempUrl)
+                
+                print("   ↳ \(chapterPoints.count) points (cumulative offset: \(String(format: "%.1f", timeOffset))s)")
             }
             
             self.telemetry.loadTelemetry(allPoints)
