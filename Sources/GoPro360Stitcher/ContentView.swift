@@ -300,6 +300,9 @@ struct ContentView: View {
                                     }
                                 }
                             }
+                            
+                            Toggle("Spatial Audio (Ambisonics)", isOn: $processor.exportSpatialAudio)
+                                .toggleStyle(SwitchToggleStyle(tint: .blue))
                         }
                         .pickerStyle(MenuPickerStyle())
                         

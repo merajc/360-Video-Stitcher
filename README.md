@@ -16,7 +16,7 @@ A high-performance native macOS application designed to ingest, stitch, reframe,
   - Handles the complex `ROT_90` and `ROT_270` mappings to correct the Rear, Top, and Bottom faces without geometric folding.
   - Perfectly aligns the 64-pixel seam overlaps at exactly `x=688` and `x=3280` cuts.
 - **Interactive 360 Viewer:** Produces a seamless spherical view of the 360 world with Pan, Tilt, Roll, and Zoom controls.
-- **Telemetry Integration:** Stub exists for GPMF telemetry extraction to draw GPS track maps (Work in progress).
+- **Telemetry Integration:** Dynamic GPS track maps, speedometers, and G-force gauges overlaid directly onto the video using natively extracted GPMF data.
 
 ## 🛠 Symlink Workaround
 Since `AVFoundation` does not natively recognize the `.360` file extension as a valid media container, this application implements a robust **Symlink Proxy Strategy**:
@@ -60,6 +60,6 @@ To verify the engine without the UI:
 - [x] **Batch Processing Queue:** Ability to queue multiple `.360` files for headless background stitching and export.
 - [x] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings.
 - [x] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.
-- [ ] **Spatial Audio (Ambisonics):** Proper mapping of GoPro's 4-channel ambisonic audio to a spatialized 360 soundscape.
+- [x] **Spatial Audio (Ambisonics):** Proper mapping of GoPro's 4-channel ambisonic audio to a spatialized 360 soundscape.
 - [ ] **Close video file:** Allow user to close the video file and open new one(s) instead of shutting down the application to open a new video file.
 - [ ] **AI Super-Resolution:** Integrate CoreML for hardware-accelerated upscaling during the export pipeline.

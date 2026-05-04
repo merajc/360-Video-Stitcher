@@ -71,6 +71,7 @@ class VideoProcessor: ObservableObject {
     @Published var exportResolution: ExportResolution = .uhd4k
     @Published var exportCodec: ExportCodec = .hevc
     @Published var exportBitrate: ExportBitrate = .high
+    @Published var exportSpatialAudio: Bool = true
     
     // Reframing Parameters - Top View
     @Published var topPan: Double = UserDefaults.standard.object(forKey: "topPan") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topPan, forKey: "topPan") } }
@@ -211,8 +212,35 @@ class VideoProcessor: ObservableObject {
                 
                 print("📽 [Stitcher]   - Found \(videoTracks.count) video tracks and \(audioTracks.count) audio tracks.")
                 
-                guard videoTracks.count >= 2, let assetAudioTrack = audioTracks.first else {
+                guard videoTracks.count >= 2 else {
                     print("❌ [Stitcher] Missing dual-video tracks in \(url.lastPathComponent).")
+                    continue
+                }
+                
+                var selectedAudioTrack: AVAssetTrack?
+                if exportSpatialAudio {
+                    for track in audioTracks {
+                        if let formatDescs = try? await track.load(.formatDescriptions),
+                           let formatDesc = formatDescs.first,
+                           let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) {
+                            if streamDesc.pointee.mChannelsPerFrame == 4 {
+                                selectedAudioTrack = track
+                                print("📽 [Stitcher]   - Selected 4-Channel Ambisonics Audio Track.")
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                if selectedAudioTrack == nil {
+                    selectedAudioTrack = audioTracks.first
+                    if let _ = selectedAudioTrack {
+                        print("📽 [Stitcher]   - Selected Default/Stereo Audio Track.")
+                    }
+                }
+                
+                guard let assetAudioTrack = selectedAudioTrack else {
+                    print("❌ [Stitcher] Missing audio track in \(url.lastPathComponent).")
                     continue
                 }
                 
@@ -385,17 +413,49 @@ class VideoProcessor: ObservableObject {
                 AVEncoderBitRateKey: 192000
             ]
             
+            // Check if we have 4 channels in the composition (Spatial Audio)
+            var has4ChannelAudio = false
+            for track in audioTracks {
+                if let formatDescs = try? await track.load(.formatDescriptions),
+                   let formatDesc = formatDescs.first,
+                   let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) {
+                    if streamDesc.pointee.mChannelsPerFrame == 4 {
+                        has4ChannelAudio = true
+                        break
+                    }
+                }
+            }
+            
+            if has4ChannelAudio {
+                var channelLayout = AudioChannelLayout()
+                channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Ambisonic_B_Format
+                let layoutData = Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
+                
+                audioSettings[AVNumberOfChannelsKey] = 4
+                audioSettings[AVChannelLayoutKey] = layoutData
+                print("🔈 [Exporter] Configured 4-Channel Ambisonics audio output.")
+            } else {
+                print("🔈 [Exporter] Configured 2-Channel Stereo audio output.")
+            }
+            
             if job.codec == .prores {
                 // ProRes typical audio is LPCM
                 audioSettings = [
                     AVFormatIDKey: kAudioFormatLinearPCM,
                     AVSampleRateKey: 48000,
-                    AVNumberOfChannelsKey: 2,
+                    AVNumberOfChannelsKey: has4ChannelAudio ? 4 : 2,
                     AVLinearPCMBitDepthKey: 16,
                     AVLinearPCMIsBigEndianKey: false,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsNonInterleaved: false
                 ]
+                
+                if has4ChannelAudio {
+                    var channelLayout = AudioChannelLayout()
+                    channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Ambisonic_B_Format
+                    let layoutData = Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
+                    audioSettings[AVChannelLayoutKey] = layoutData
+                }
             }
             
             audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
