@@ -120,18 +120,24 @@ struct ContentView: View {
                         VStack(spacing: 20) {
                             ProgressView()
                                 .scaleEffect(1.5)
-                            Text(processor.isExporting ? "Rendering Video..." : "Engine Initializing...")
+                            Text("Engine Initializing...")
                                 .font(.headline)
                                 .italic()
+                        }
+                    } else if processor.isExporting {
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Rendering Video...")
+                                .font(.headline)
                             
-                            if processor.isExporting {
-                                VStack(spacing: 8) {
-                                    ProgressView(value: processor.exportProgress, total: 1.0)
-                                        .progressViewStyle(.linear)
-                                        .frame(width: 200)
-                                    Text("\(Int(processor.exportProgress * 100))%")
-                                        .font(.caption.monospaced())
-                                }
+                            VStack(spacing: 8) {
+                                ProgressView(value: processor.exportProgress, total: 1.0)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 300)
+                                Text("\(Int(processor.exportProgress * 100))%")
+                                    .font(.title3.monospaced())
+                                    .bold()
                             }
                         }
                     } else if let player = processor.player {
@@ -176,22 +182,6 @@ struct ContentView: View {
                             Seekbar(processor: processor)
                                 .frame(width: 400)
                                 .padding(.bottom, 40)
-                        }
-                    } else if processor.isExporting {
-                        VStack(spacing: 20) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                            Text("Rendering Video...")
-                                .font(.headline)
-                            
-                            VStack(spacing: 8) {
-                                ProgressView(value: processor.exportProgress, total: 1.0)
-                                    .progressViewStyle(.linear)
-                                    .frame(width: 300)
-                                Text("\(Int(processor.exportProgress * 100))%")
-                                    .font(.title3.monospaced())
-                                    .bold()
-                            }
                         }
                     } else {
                         VStack(spacing: 15) {
