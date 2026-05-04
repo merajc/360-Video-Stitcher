@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+import CoreMedia
 import CoreLocation
 
 struct GPSData {
@@ -7,124 +7,108 @@ struct GPSData {
     let coordinate: CLLocationCoordinate2D
     let altitude: Double
     let speed: Double
+    let speed3D: Double
 }
 
 class GPMFParser {
-    /// Overload that handles .360 extension issues
     func extractGPSData(from url: URL) async -> [GPSData] {
-        let tempDir = FileManager.default.temporaryDirectory
-        let tempUrl = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mp4")
+        print("🗺 [GPMF] Scanning asset for telemetry tracks via native parser...")
+        let parser = MP4BoxParser(url: url)
         
-        do {
-            try FileManager.default.createSymbolicLink(at: tempUrl, withDestinationURL: url)
-        } catch {
-            print("⚠️ [GPMF] Failed to create symlink: \(error.localizedDescription)")
-        }
-        
-        let assetUrl = FileManager.default.fileExists(atPath: tempUrl.path) ? tempUrl : url
-        let asset = AVURLAsset(url: assetUrl)
-        
-        defer {
-            if assetUrl != url {
-                try? FileManager.default.removeItem(at: assetUrl)
-            }
-        }
-        
-        do {
-            return try await extractGPSData(from: asset)
-        } catch {
-            print("❌ [GPMF] Error: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Extracts GPS5 data from a GoPro metadata track
-    func extractGPSData(from asset: AVAsset) async throws -> [GPSData] {
-        print("🗺 [GPMF] Scanning asset for telemetry tracks...")
-        let tracks = try await asset.load(.tracks)
-        
-        var gpmdTrack: AVAssetTrack?
-        for track in tracks {
-            let formats = try await track.load(.formatDescriptions)
-            if formats.contains(where: { CMFormatDescriptionGetMediaSubType($0) == 0x67706d64 }) {
-                gpmdTrack = track
-                break
-            }
-        }
-        
-        guard let finalTrack = gpmdTrack else {
+        guard let (samples, timescale) = parser.extractGPMFSamples() else {
             print("⚠️ [GPMF] No 'gpmd' track found.")
             return []
         }
         
-        print("🗺 [GPMF] Found GoPro Metadata track. Starting reader...")
+        print("🗺 [GPMF] Found GoPro Metadata track. Processing \(samples.count) blocks...")
         
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: finalTrack, outputSettings: nil)
-        reader.add(output)
-        reader.startReading()
-        
-        print("🗺 [GPMF] Processing sample buffers...")
         var allGPSData: [GPSData] = []
-        var sampleCount = 0
+        var currentTime = CMTime(value: 0, timescale: Int32(timescale))
         
-        while let sampleBuffer = output.copyNextSampleBuffer() {
-            sampleCount += 1
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
-            
-            var length = 0
-            var totalLength = 0
-            var dataPtr: UnsafeMutablePointer<Int8>?
-            
-            CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: &length, totalLengthOut: &totalLength, dataPointerOut: &dataPtr)
-            
-            if let ptr = dataPtr {
-                let data = Data(bytes: ptr, count: totalLength)
-                let samples = parseGPMF(data: data, pts: pts)
-                allGPSData.append(contentsOf: samples)
+        for sample in samples {
+            if let data = parser.readSampleData(sample: sample) {
+                // Parse the payload block
+                let blockGPS = parseGPMF(data: data, pts: currentTime)
+                allGPSData.append(contentsOf: blockGPS)
             }
+            currentTime = CMTimeAdd(currentTime, CMTime(value: Int64(sample.duration), timescale: Int32(timescale)))
         }
         
-        print("✅ [GPMF] Extraction finished. Processed \(sampleCount) blocks, found \(allGPSData.count) GPS points.")
+        print("✅ [GPMF] Extraction finished. Found \(allGPSData.count) GPS points.")
         return allGPSData
     }
     
-    // Simple KLV parser looking for 'GPS5'
     private func parseGPMF(data: Data, pts: CMTime) -> [GPSData] {
-        let results: [GPSData] = []
-        let gps5Key: [UInt8] = [0x47, 0x50, 0x53, 0x35] // "GPS5"
+        var results: [GPSData] = []
         
-        var i = 0
-        while i < data.count - 8 {
-            let key = Array(data[i..<i+4])
-            let _ = data[i+4] // type (unused)
-            let size = Int(data[i+5])
-            let count = Int(UInt16(data[i+6]) << 8 | UInt16(data[i+7]))
-            let totalPayloadSize = size * count
+        // GPMF is KLV: Key(4), Type(1), Size(1), Count(2) -> 8 bytes
+        var currentScales: [Int32] = []
+        
+        func parseKLV(offset: Int, length: Int) {
+            var i = offset
+            let end = offset + length
             
-            i += 8
-            if key == gps5Key {
-                // GPS5 usually contains Latitude, Longitude, Altitude, Speed, 3D Speed
-                // We expect floating point values (type 'f' = 0x66 or 'd' = 0x64 etc, but GoPro often uses scaled ints)
-                // For this lightweight version, we'll assume standard GoPro GPS5 layout if found
-                // Note: GoPro metadata is big-endian
+            while i + 8 <= end {
+                let keyStr = String(data: data[i..<i+4], encoding: .ascii) ?? ""
+                let type = data[i+4]
+                let size = Int(data[i+5])
+                let count = Int(data[i+6...i+7].withUnsafeBytes { $0.loadUnaligned(as: UInt16.self).bigEndian })
+                let payloadLen = size * count
+                let paddedLen = (payloadLen + 3) & ~3
                 
-                // This is a simplified extraction. Real GoPro GPS5 often needs scaling factors (SCAL key).
-                // For brevity, we'll assume a fixed format or wait for user to provide sample files for better calibration.
-                // Normally we'd look for the 'SCAL' sibling to get the divisors.
+                i += 8
+                if i + payloadLen > end { break }
                 
-                // Placeholder: extract one coordinate per block at least for the track outline
-                if totalPayloadSize >= 16 {
-                    // Just a mock extraction logic for illustration
-                    // In a production app, we would use the SCAL factors found earlier in the stream.
+                if type == 0 { // Nested structure
+                    parseKLV(offset: i, length: payloadLen)
+                } else {
+                    let typeChar = String(bytes: [type], encoding: .ascii) ?? "?"
+                    
+                    if keyStr == "SCAL" && (typeChar == "l" || typeChar == "L") && size == 4 {
+                        currentScales = []
+                        for j in 0..<count {
+                            let start = i + j * 4
+                            let scale = data[start..<start+4].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                            currentScales.append(scale)
+                        }
+                    }
+                    
+                    if keyStr == "GPS5" && typeChar == "l" && size == 20 {
+                        let numSamples = count
+                        if numSamples > 0 && currentScales.count >= 5 {
+                            for j in 0..<numSamples {
+                                let start = i + j * 20
+                                let lat = data[start..<start+4].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                let lon = data[start+4..<start+8].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                let alt = data[start+8..<start+12].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                let speed2d = data[start+12..<start+16].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                let speed3d = data[start+16..<start+20].withUnsafeBytes { $0.loadUnaligned(as: Int32.self).bigEndian }
+                                
+                                let flat = Double(lat) / Double(currentScales[0])
+                                let flon = Double(lon) / Double(currentScales[1])
+                                let falt = Double(alt) / Double(currentScales[2])
+                                let fspeed = Double(speed2d) / Double(currentScales[3])
+                                let fspeed3d = Double(speed3d) / Double(currentScales[4])
+                                
+                                // Map all block samples to the block's PTS for simplicity
+                                let gpsData = GPSData(
+                                    timestamp: pts,
+                                    coordinate: CLLocationCoordinate2D(latitude: flat, longitude: flon),
+                                    altitude: falt,
+                                    speed: fspeed,
+                                    speed3D: fspeed3d
+                                )
+                                results.append(gpsData)
+                            }
+                        }
+                    }
                 }
+                
+                i += paddedLen
             }
-            
-            // Advance to next KLV (padded to 4 bytes)
-            i += (totalPayloadSize + 3) & ~3
         }
         
+        parseKLV(offset: 0, length: data.count)
         return results
     }
 }

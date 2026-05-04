@@ -104,6 +104,7 @@ struct ContentView: View {
     @State private var isTargeted = false
     @StateObject private var processor = VideoProcessor()
     @State private var showTrackMap = true
+    @State private var showTelemetryDashboard = true
     @State private var currentTime: Double = 0
     
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
@@ -170,6 +171,10 @@ struct ContentView: View {
                                         }
                                     }
                                     Spacer()
+                                    if showTelemetryDashboard && !processor.telemetry.trackPoints.isEmpty {
+                                        TelemetryDashboardView(telemetry: processor.telemetry)
+                                            .padding(.bottom, 20)
+                                    }
                                 }
                                 .padding(10)
                             }
@@ -262,6 +267,9 @@ struct ContentView: View {
                                 .foregroundColor(.secondary)
                             
                             Toggle("GPS TRACK MAP", isOn: $showTrackMap)
+                                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                
+                            Toggle("TELEMETRY DASHBOARD", isOn: $showTelemetryDashboard)
                                 .toggleStyle(SwitchToggleStyle(tint: .blue))
                         }
                         
@@ -393,6 +401,7 @@ struct ContentView: View {
         .onReceive(timer) { _ in
             if let p = processor.player {
                 currentTime = p.currentTime().seconds
+                processor.telemetry.updateCurrentTime(currentTime)
             }
         }
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in

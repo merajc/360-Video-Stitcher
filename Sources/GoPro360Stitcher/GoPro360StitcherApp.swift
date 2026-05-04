@@ -30,22 +30,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             
             Task {
-                let processor = await VideoProcessor()
+                let processor = VideoProcessor()
                 let url = URL(fileURLWithPath: path)
                 
                 await processor.processFiles(urls: [url])
                 
-                if await processor.composition != nil {
+                if processor.composition != nil {
                     print("🧪 [TestMode] File processed successfully. Exporting...")
                     do {
                         let maxDuration = durationSeconds > 0 ? CMTime(seconds: Double(durationSeconds), preferredTimescale: 600) : nil
-                        await processor.addToQueue(name: "Test Job", outputUrl: outputPath)
-                        if let job = await processor.batchQueue.first {
+                        processor.addToQueue(name: "Test Job", outputUrl: outputPath)
+                        if let job = processor.batchQueue.first {
                             try await processor.exportVideoWithWriter(job: job, maxDuration: maxDuration)
                         }
                         print("🧪 [TestMode] Export finished at: \(outputPath.path)")
                         print("✅ [TestMode] TEST PASSED!")
-                        await NSApplication.shared.terminate(nil)
+                        NSApplication.shared.terminate(nil)
                     } catch {
                         print("❌ [TestMode] Export failed: \(error.localizedDescription)")
                         exit(1)

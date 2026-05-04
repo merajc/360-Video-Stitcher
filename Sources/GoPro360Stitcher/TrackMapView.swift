@@ -13,24 +13,22 @@ struct TrackMapView: View {
                         .font(.caption)
                         .foregroundColor(.gray)
                 } else {
-                    Path { path in
+                    Canvas { context, size in
                         let points = telemetry.trackPoints
-                        guard let first = points.first else { return }
-                        
-                        path.move(to: normalize(first, in: geometry.size))
                         for i in 1..<points.count {
-                            path.addLine(to: normalize(points[i], in: geometry.size))
+                            var path = Path()
+                            path.move(to: normalize(points[i-1], in: size))
+                            path.addLine(to: normalize(points[i], in: size))
+                            let color = trackColor(for: points[i].speed3D)
+                            context.stroke(path, with: .color(color), lineWidth: 2)
                         }
-                    }
-                    .stroke(Color.blue.opacity(0.5), lineWidth: 2)
-                    
-                    // Current Position Indicator
-                    if let currentPoint = telemetry.trackPoints.last(where: { $0.timestamp <= currentTime }) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                            .position(normalize(currentPoint, in: geometry.size))
-                            .shadow(radius: 2)
+                        
+                        // Draw current position indicator
+                        if let currentPoint = telemetry.trackPoints.last(where: { $0.timestamp <= currentTime }) {
+                            let currentPos = normalize(currentPoint, in: size)
+                            let rect = CGRect(x: currentPos.x - 4, y: currentPos.y - 4, width: 8, height: 8)
+                            context.fill(Path(ellipseIn: rect), with: .color(.red))
+                        }
                     }
                 }
             }
@@ -48,6 +46,12 @@ struct TrackMapView: View {
         let y = (1.0 - (point.latitude - telemetry.minLat) / latRange) * size.height
         
         return CGPoint(x: x, y: y)
+    }
+    
+    private func trackColor(for speed: Double) -> Color {
+        // Assume speed is in m/s. 0 m/s = blue, > 30 m/s (~100km/h) = red
+        let normalized = min(1.0, max(0.0, speed / 30.0))
+        return Color(red: normalized, green: 0.2, blue: 1.0 - normalized)
     }
 }
 

@@ -54,12 +54,12 @@ To verify the engine without the UI:
 - `GPMFParser.swift`: Telemetry extraction logic.
 
 ## 🗺 Roadmap
-- [ ] **UI Progress Reporting:** Add real-time progress bars for export and batch operations.
-- [ ] **Advanced Export Controls:** Selection for output resolution (up to 5.6K), bitrate, and HEVC/ProRes encoding profiles.
-- [ ] **Append continuous files:** GoPro tends to cut files when they reach 4GB, we want the ability to combine files and apply the same controls (tilt, pan, roll, zoom) for transition-less continuous shots
-- [ ] **Batch Processing Queue:** Ability to queue multiple `.360` files for headless background stitching and export.
-- [ ] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings per file.
-- [ ] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.
+- [x] **UI Progress Reporting:** Add real-time progress bars for export and batch operations.
+- [x] **Advanced Export Controls:** Selection for output resolution (up to 5.6K), bitrate, and HEVC/ProRes encoding profiles.
+- [x] **Append continuous files:** GoPro tends to cut files when they reach 4GB, we want the ability to combine files and apply the same controls (tilt, pan, roll, zoom) for transition-less continuous shots
+- [x] **Batch Processing Queue:** Ability to queue multiple `.360` files for headless background stitching and export.
+- [x] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings.
+- [x] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.
 - [ ] **Spatial Audio (Ambisonics):** Proper mapping of GoPro's 4-channel ambisonic audio to a spatialized 360 soundscape.
 - [ ] **Keyframe Re-framing:** Implement a timeline to animate camera movements (Pan/Tilt) for cinematic exported shots.
 - [ ] **AI Super-Resolution:** Integrate CoreML for hardware-accelerated upscaling during the export pipeline.

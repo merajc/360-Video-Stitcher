@@ -131,6 +131,7 @@ class VideoProcessor: ObservableObject {
                 print("📽 [Processor] Extracting telemetry from \(firstUrl.lastPathComponent)...")
                 let parser = GPMFParser()
                 let points = await parser.extractGPSData(from: firstUrl)
+                self.telemetry.loadTelemetry(points)
                 self.extractedTelemetry = points.map { $0.coordinate }
                 print("✅ [Processor] Extracted \(points.count) GPS points.")
             }
@@ -242,10 +243,6 @@ class VideoProcessor: ObservableObject {
         item.videoComposition = generateVideoComposition()
         self.player = AVPlayer(playerItem: item)
         print("✅ [Stitcher] Composition complete. Total duration: \(String(format: "%.2f", currentTime.seconds))s")
-        
-        Task {
-            await telemetry.extractTelemetry(from: composition)
-        }
     }
     
     private let renderer = EACRenderer()
