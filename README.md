@@ -56,6 +56,7 @@ To verify the engine without the UI:
 ## 🗺 Roadmap
 - [ ] **UI Progress Reporting:** Add real-time progress bars for export and batch operations.
 - [ ] **Advanced Export Controls:** Selection for output resolution (up to 5.6K), bitrate, and HEVC/ProRes encoding profiles.
+- [ ] **Append continuous files:** GoPro tends to cut files when they reach 4GB, we want the ability to combine files and apply the same controls (tilt, pan, roll, zoom) for transition-less continuous shots
 - [ ] **Batch Processing Queue:** Ability to queue multiple `.360` files for headless background stitching and export.
 - [ ] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings per file.
 - [ ] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.

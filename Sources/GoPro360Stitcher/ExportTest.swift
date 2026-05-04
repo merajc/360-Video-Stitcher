@@ -32,8 +32,11 @@ func runExportTest() async {
     try? FileManager.default.createDirectory(at: outputUrl.deletingLastPathComponent(), withIntermediateDirectories: true)
     
     do {
-        try await processor.exportVideo(to: outputUrl, maxDuration: CMTime(seconds: 10, preferredTimescale: 600))
-        print("✅ [Test] Export successful! Saved to: \(outputFile)")
+        await processor.addToQueue(name: "Test Job", outputUrl: outputUrl)
+        if let job = await processor.batchQueue.first {
+            try await processor.exportVideoWithWriter(job: job, maxDuration: CMTime(seconds: 10, preferredTimescale: 600))
+            print("✅ [Test] Export successful! Saved to: \(outputFile)")
+        }
     } catch {
         print("❌ [Test] Export failed: \(error.localizedDescription)")
     }

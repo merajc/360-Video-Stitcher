@@ -39,7 +39,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     print("🧪 [TestMode] File processed successfully. Exporting...")
                     do {
                         let maxDuration = durationSeconds > 0 ? CMTime(seconds: Double(durationSeconds), preferredTimescale: 600) : nil
-                        try await processor.exportVideo(to: outputPath, maxDuration: maxDuration)
+                        await processor.addToQueue(name: "Test Job", outputUrl: outputPath)
+                        if let job = await processor.batchQueue.first {
+                            try await processor.exportVideoWithWriter(job: job, maxDuration: maxDuration)
+                        }
                         print("🧪 [TestMode] Export finished at: \(outputPath.path)")
                         print("✅ [TestMode] TEST PASSED!")
                         await NSApplication.shared.terminate(nil)

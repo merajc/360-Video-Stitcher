@@ -265,20 +265,116 @@ struct ContentView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: .blue))
                         }
                         
-                        Spacer(minLength: 40)
+                        Spacer(minLength: 20)
                         
-                        Button(action: {
-                            exportVideo()
-                        }) {
-                            HStack {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("GENERATE 9:16 VIDEO")
-                                    .bold()
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("EXPORT SETTINGS")
+                                .font(.system(.caption, design: .rounded))
+                                .kerning(2)
+                                .foregroundColor(.secondary)
+                            
+                            Picker("Resolution", selection: $processor.exportResolution) {
+                                ForEach(ExportResolution.allCases) { res in
+                                    Text(res.rawValue).tag(res)
+                                }
                             }
-                            .frame(maxWidth: .infinity)
+                            
+                            Picker("Codec", selection: $processor.exportCodec) {
+                                ForEach(ExportCodec.allCases) { codec in
+                                    Text(codec.rawValue).tag(codec)
+                                }
+                            }
+                            
+                            if processor.exportCodec == .hevc {
+                                Picker("Bitrate", selection: $processor.exportBitrate) {
+                                    ForEach(ExportBitrate.allCases) { bitrate in
+                                        Text(bitrate.rawValue).tag(bitrate)
+                                    }
+                                }
+                            }
                         }
-                        .buttonStyle(PremiumButtonStyle())
-                        .disabled(processor.composition == nil)
+                        .pickerStyle(MenuPickerStyle())
+                        
+                        Spacer(minLength: 20)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("BATCH QUEUE")
+                                .font(.system(.caption, design: .rounded))
+                                .kerning(2)
+                                .foregroundColor(.secondary)
+                            
+                            if !processor.batchQueue.isEmpty {
+                                VStack(spacing: 8) {
+                                    ForEach(processor.batchQueue) { job in
+                                        HStack {
+                                            VStack(alignment: .leading) {
+                                                Text(job.name)
+                                                    .font(.caption)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                                
+                                                if case .failed(let err) = job.status {
+                                                    Text(err)
+                                                        .font(.caption2)
+                                                        .foregroundColor(.red)
+                                                        .lineLimit(1)
+                                                }
+                                            }
+                                            Spacer()
+                                            
+                                            switch job.status {
+                                            case .pending:
+                                                Image(systemName: "clock")
+                                                    .foregroundColor(.secondary)
+                                            case .exporting:
+                                                ProgressView()
+                                                    .scaleEffect(0.5)
+                                                    .frame(width: 16, height: 16)
+                                            case .completed:
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundColor(.green)
+                                            case .failed:
+                                                Image(systemName: "exclamationmark.circle.fill")
+                                                    .foregroundColor(.red)
+                                            }
+                                        }
+                                        .padding(8)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(8)
+                                    }
+                                }
+                            }
+                            
+                            HStack(spacing: 10) {
+                                Button(action: {
+                                    addToQueue()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "plus")
+                                        Text("ADD")
+                                            .bold()
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(PremiumButtonStyle())
+                                .disabled(processor.composition == nil || processor.isExporting)
+                                
+                                Button(action: {
+                                    Task {
+                                        await processor.startBatchExport()
+                                    }
+                                }) {
+                                    HStack {
+                                        Image(systemName: "play.fill")
+                                        Text("START")
+                                            .bold()
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(PremiumButtonStyle())
+                                .disabled(processor.batchQueue.filter { $0.status == .pending || $0.status == .failed("Retry") }.isEmpty || processor.isExporting)
+                            }
+                        }
                         
                         Text("M4 MEDIA ENGINE ACTIVE")
                             .font(.system(size: 9, weight: .bold))
@@ -329,16 +425,16 @@ struct ContentView: View {
         }
     }
     
-    private func exportVideo() {
+    private func addToQueue() {
         let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.mpeg4Movie]
-        savePanel.nameFieldStringValue = "GoPro_Edit.mp4"
+        
+        let isHevc = processor.exportCodec == .hevc
+        savePanel.allowedContentTypes = isHevc ? [.mpeg4Movie] : [.quickTimeMovie]
+        savePanel.nameFieldStringValue = isHevc ? "GoPro_Edit_\(processor.batchQueue.count + 1).mp4" : "GoPro_Edit_\(processor.batchQueue.count + 1).mov"
         
         savePanel.begin { result in
             if result == .OK, let url = savePanel.url {
-                Task {
-                    try? await processor.exportVideo(to: url)
-                }
+                processor.addToQueue(name: url.lastPathComponent, outputUrl: url)
             }
         }
     }

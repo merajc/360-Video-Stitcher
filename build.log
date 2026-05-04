@@ -1,0 +1,101 @@
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--1AB21518FC5DEDBE.txt
+[2/3] Compiling GoPro360Stitcher ContentView.swift
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/ExportTest.swift:35:29: error: value of type 'VideoProcessor' has no member 'exportVideo'
+33 |     
+34 |     do {
+35 |         try await processor.exportVideo(to: outputUrl, maxDuration: CMTime(seconds: 10, preferredTimescale: 600))
+   |                             `- error: value of type 'VideoProcessor' has no member 'exportVideo'
+36 |         print("✅ [Test] Export successful! Saved to: \(outputFile)")
+37 |     } catch {
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/GoPro360StitcherApp.swift:42:45: error: value of type 'VideoProcessor' has no member 'exportVideo'
+40 |                     do {
+41 |                         let maxDuration = durationSeconds > 0 ? CMTime(seconds: Double(durationSeconds), preferredTimescale: 600) : nil
+42 |                         try await processor.exportVideo(to: outputPath, maxDuration: maxDuration)
+   |                                             `- error: value of type 'VideoProcessor' has no member 'exportVideo'
+43 |                         print("🧪 [TestMode] Export finished at: \(outputPath.path)")
+44 |                         print("✅ [TestMode] TEST PASSED!")
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:31:31: error: type 'AVVideoCodecType' has no member 'appleProRes422'
+ 29 |         switch self {
+ 30 |         case .hevc: return .hevc
+ 31 |         case .prores: return .appleProRes422
+    |                               `- error: type 'AVVideoCodecType' has no member 'appleProRes422'
+ 32 |         }
+ 33 |     }
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:313:66: error: cannot find 'kVTProfileLevel_HEVC_Main_AutoLevel' in scope
+311 |         if exportCodec == .hevc {
+312 |             compressionProps[AVVideoAverageBitRateKey as String] = exportBitrate.bitsPerSecond(for: exportResolution)
+313 |             compressionProps[AVVideoProfileLevelKey as String] = kVTProfileLevel_HEVC_Main_AutoLevel
+    |                                                                  `- error: cannot find 'kVTProfileLevel_HEVC_Main_AutoLevel' in scope
+314 |         }
+315 |         
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:376:19: warning: capture of 'videoInput' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure [#SendableClosureCaptures]
+374 |         dispatchGroup.enter()
+375 |         videoInput.requestMediaDataWhenReady(on: videoQueue) {
+376 |             while videoInput.isReadyForMoreMediaData {
+    |                   `- warning: capture of 'videoInput' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure [#SendableClosureCaptures]
+377 |                 if let sampleBuffer = videoOutput.copyNextSampleBuffer() {
+378 |                     videoInput.append(sampleBuffer)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVAssetWriterInput.h:39:12: note: class 'AVAssetWriterInput' does not conform to the 'Sendable' protocol
+ 37 | NS_SWIFT_NONSENDABLE
+ 38 | API_AVAILABLE(macos(10.7), ios(4.1), tvos(9.0), visionos(1.0)) API_UNAVAILABLE(watchos)
+ 39 | @interface AVAssetWriterInput : NSObject
+    |            `- note: class 'AVAssetWriterInput' does not conform to the 'Sendable' protocol
+ 40 | {
+ 41 | @private
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:377:39: warning: capture of 'videoOutput' with non-Sendable type 'AVAssetReaderVideoCompositionOutput' in a '@Sendable' closure [#SendableClosureCaptures]
+375 |         videoInput.requestMediaDataWhenReady(on: videoQueue) {
+376 |             while videoInput.isReadyForMoreMediaData {
+377 |                 if let sampleBuffer = videoOutput.copyNextSampleBuffer() {
+    |                                       `- warning: capture of 'videoOutput' with non-Sendable type 'AVAssetReaderVideoCompositionOutput' in a '@Sendable' closure [#SendableClosureCaptures]
+378 |                     videoInput.append(sampleBuffer)
+379 |                     let pTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVAssetReaderOutput.h:450:12: note: class 'AVAssetReaderVideoCompositionOutput' does not conform to the 'Sendable' protocol
+448 |  */
+449 | API_AVAILABLE(macos(10.7), ios(4.1), tvos(9.0), visionos(1.0)) API_UNAVAILABLE(watchos)
+450 | @interface AVAssetReaderVideoCompositionOutput : AVAssetReaderOutput
+    |            `- note: class 'AVAssetReaderVideoCompositionOutput' does not conform to the 'Sendable' protocol
+451 | {
+452 | @private
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:394:23: warning: capture of 'aInput' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure [#SendableClosureCaptures]
+392 |             dispatchGroup.enter()
+393 |             aInput.requestMediaDataWhenReady(on: audioQueue) {
+394 |                 while aInput.isReadyForMoreMediaData {
+    |                       `- warning: capture of 'aInput' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure [#SendableClosureCaptures]
+395 |                     if let sampleBuffer = aOutput.copyNextSampleBuffer() {
+396 |                         aInput.append(sampleBuffer)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVAssetWriterInput.h:39:12: note: class 'AVAssetWriterInput' does not conform to the 'Sendable' protocol
+ 37 | NS_SWIFT_NONSENDABLE
+ 38 | API_AVAILABLE(macos(10.7), ios(4.1), tvos(9.0), visionos(1.0)) API_UNAVAILABLE(watchos)
+ 39 | @interface AVAssetWriterInput : NSObject
+    |            `- note: class 'AVAssetWriterInput' does not conform to the 'Sendable' protocol
+ 40 | {
+ 41 | @private
+
+/Users/merajchhaya/.gemini/antigravity/scratch/GoPro360Stitcher/Sources/GoPro360Stitcher/VideoProcessor.swift:395:43: warning: capture of 'aOutput' with non-Sendable type 'AVAssetReaderAudioMixOutput' in a '@Sendable' closure [#SendableClosureCaptures]
+393 |             aInput.requestMediaDataWhenReady(on: audioQueue) {
+394 |                 while aInput.isReadyForMoreMediaData {
+395 |                     if let sampleBuffer = aOutput.copyNextSampleBuffer() {
+    |                                           `- warning: capture of 'aOutput' with non-Sendable type 'AVAssetReaderAudioMixOutput' in a '@Sendable' closure [#SendableClosureCaptures]
+396 |                         aInput.append(sampleBuffer)
+397 |                     } else {
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVAssetReaderOutput.h:334:12: note: class 'AVAssetReaderAudioMixOutput' does not conform to the 'Sendable' protocol
+332 |  */
+333 | API_AVAILABLE(macos(10.7), ios(4.1), tvos(9.0), visionos(1.0)) API_UNAVAILABLE(watchos)
+334 | @interface AVAssetReaderAudioMixOutput : AVAssetReaderOutput
+    |            `- note: class 'AVAssetReaderAudioMixOutput' does not conform to the 'Sendable' protocol
+335 | {
+336 | @private
+
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>

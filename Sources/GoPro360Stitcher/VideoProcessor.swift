@@ -2,6 +2,60 @@ import Foundation
 import SwiftUI
 import AVFoundation
 import CoreLocation
+import VideoToolbox
+
+enum ExportResolution: String, CaseIterable, Identifiable {
+    case hd1080 = "1080p (HD)"
+    case uhd4k = "4K (UHD)"
+    case max5_6k = "5.6K (MAX)"
+    
+    var id: String { rawValue }
+    
+    var size: CGSize {
+        switch self {
+        case .hd1080: return CGSize(width: 1080, height: 1920)
+        case .uhd4k: return CGSize(width: 2160, height: 3840)
+        case .max5_6k: return CGSize(width: 3168, height: 5632)
+        }
+    }
+}
+
+enum ExportCodec: String, CaseIterable, Identifiable {
+    case hevc = "HEVC (H.265)"
+    case prores = "Apple ProRes 422"
+    
+    var id: String { rawValue }
+    
+    var avVideoCodecType: AVVideoCodecType {
+        switch self {
+        case .hevc: return .hevc
+        case .prores: return .proRes422
+        }
+    }
+}
+
+enum ExportBitrate: String, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case high = "High"
+    case maximum = "Maximum"
+    
+    var id: String { rawValue }
+    
+    func bitsPerSecond(for resolution: ExportResolution) -> Int {
+        let baseMultiplier: Double
+        switch self {
+        case .standard: baseMultiplier = 1.0
+        case .high: baseMultiplier = 2.0
+        case .maximum: baseMultiplier = 4.0
+        }
+        
+        switch resolution {
+        case .hd1080: return Int(15_000_000 * baseMultiplier)
+        case .uhd4k: return Int(40_000_000 * baseMultiplier)
+        case .max5_6k: return Int(80_000_000 * baseMultiplier)
+        }
+    }
+}
 
 @MainActor
 class VideoProcessor: ObservableObject {
@@ -14,17 +68,25 @@ class VideoProcessor: ObservableObject {
     @Published var exportProgress: Double = 0.0
     @Published var isExporting: Bool = false
     
+    @Published var exportResolution: ExportResolution = .uhd4k
+    @Published var exportCodec: ExportCodec = .hevc
+    @Published var exportBitrate: ExportBitrate = .high
+    
     // Reframing Parameters - Top View
-    @Published var topPan: Double = 0 { didSet { updateVideoComposition() } }
-    @Published var topTilt: Double = 0 { didSet { updateVideoComposition() } }
-    @Published var topRoll: Double = 0 { didSet { updateVideoComposition() } }
-    @Published var topFOV: Double = 90 { didSet { updateVideoComposition() } }
+    @Published var topPan: Double = UserDefaults.standard.object(forKey: "topPan") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topPan, forKey: "topPan") } }
+    @Published var topTilt: Double = UserDefaults.standard.object(forKey: "topTilt") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topTilt, forKey: "topTilt") } }
+    @Published var topRoll: Double = UserDefaults.standard.object(forKey: "topRoll") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topRoll, forKey: "topRoll") } }
+    @Published var topFOV: Double = UserDefaults.standard.object(forKey: "topFOV") as? Double ?? 90 { didSet { updateVideoComposition(); UserDefaults.standard.set(topFOV, forKey: "topFOV") } }
     
     // Reframing Parameters - Bottom View
-    @Published var bottomPan: Double = 180 { didSet { updateVideoComposition() } }
-    @Published var bottomTilt: Double = 0 { didSet { updateVideoComposition() } }
-    @Published var bottomRoll: Double = 0 { didSet { updateVideoComposition() } }
-    @Published var bottomFOV: Double = 90 { didSet { updateVideoComposition() } }
+    @Published var bottomPan: Double = UserDefaults.standard.object(forKey: "bottomPan") as? Double ?? 180 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomPan, forKey: "bottomPan") } }
+    @Published var bottomTilt: Double = UserDefaults.standard.object(forKey: "bottomTilt") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomTilt, forKey: "bottomTilt") } }
+    @Published var bottomRoll: Double = UserDefaults.standard.object(forKey: "bottomRoll") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomRoll, forKey: "bottomRoll") } }
+    @Published var bottomFOV: Double = UserDefaults.standard.object(forKey: "bottomFOV") as? Double ?? 90 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomFOV, forKey: "bottomFOV") } }
+    
+    // Batch queue
+    @Published var batchQueue: [ExportJob] = []
+    @Published var batchActiveJobName: String?
     
     // Extracted metadata
     @Published var extractedTelemetry: [CLLocationCoordinate2D] = []
@@ -196,7 +258,7 @@ class VideoProcessor: ObservableObject {
         }
         
         videoComposition.customVideoCompositorClass = EACCompositor.self
-        videoComposition.renderSize = CGSize(width: 1080, height: 1920)
+        videoComposition.renderSize = exportResolution.size
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         
         let trackIDs = composition.tracks(withMediaType: .video).map { NSNumber(value: $0.trackID) }
@@ -225,75 +287,194 @@ class VideoProcessor: ObservableObject {
         item.videoComposition = generateVideoComposition()
     }
     
-    func exportVideo(to outputUrl: URL, maxDuration: CMTime? = nil) async throws {
-        guard let composition = composition else {
-            print("⚠️ [Exporter] No composition found to export.")
+    func addToQueue(name: String, outputUrl: URL) {
+        guard let composition = composition, let videoComp = generateVideoComposition() else {
             return
         }
         
+        let job = ExportJob(
+            name: name,
+            composition: composition,
+            videoComposition: videoComp,
+            duration: composition.duration,
+            outputUrl: outputUrl,
+            resolution: exportResolution,
+            codec: exportCodec,
+            bitrate: exportBitrate
+        )
+        
+        batchQueue.append(job)
+    }
+    
+    func startBatchExport() async {
+        guard !isExporting else { return }
         isExporting = true
-        exportProgress = 0.0
-        defer { isExporting = false }
-        
-        print("🚀 [Exporter] Starting export to \(outputUrl.path)...")
-        if let maxDuration = maxDuration {
-            print("🚀 [Exporter] Limiting export duration to \(String(format: "%.2f", maxDuration.seconds))s")
+        defer {
+            isExporting = false
+            batchActiveJobName = nil
+            exportProgress = 0.0
         }
         
-        let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
-        let videoComp = generateVideoComposition()
-        
-        if let maxDuration = maxDuration {
-            exporter?.timeRange = CMTimeRange(start: .zero, duration: CMTimeMinimum(maxDuration, composition.duration))
-        }
-        
-        exporter?.videoComposition = videoComp
-        exporter?.outputURL = outputUrl
-        exporter?.outputFileType = AVFileType.mp4
-        
-        guard let exporter = exporter else {
-            print("❌ [Exporter] Failed to initialize AVAssetExportSession.")
-            return
-        }
-        
-        print("🚀 [Exporter] M4 Media Engine Warming Up...")
-        
-        // Progress tracking task
-        let progressTask = Task {
-            while exporter.status == .waiting || exporter.status == .exporting {
-                let progress = Double(exporter.progress)
-                await MainActor.run {
-                    self.exportProgress = progress
+        for index in batchQueue.indices {
+            let job = batchQueue[index]
+            if case .completed = job.status { continue }
+            
+            DispatchQueue.main.async {
+                self.batchQueue[index].status = .exporting
+                self.batchActiveJobName = job.name
+            }
+            
+            do {
+                try await exportVideoWithWriter(job: job)
+                DispatchQueue.main.async {
+                    self.batchQueue[index].status = .completed
+                    self.batchQueue[index].progress = 1.0
                 }
-                
-                // Terminal progress bar
-                let barWidth = 20
-                let filled = Int(progress * Double(barWidth))
-                let empty = barWidth - filled
-                let bar = String(repeating: "█", count: filled) + String(repeating: "░", count: empty)
-                print("\r🚀 [Exporter] Progress: [\(bar)] \(Int(progress * 100))%", terminator: "")
-                fflush(stdout)
-                
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            } catch {
+                DispatchQueue.main.async {
+                    self.batchQueue[index].status = .failed(error.localizedDescription)
+                }
             }
-            print("\n") // New line after progress bar
+        }
+    }
+    
+    func exportVideoWithWriter(job: ExportJob, maxDuration: CMTime? = nil) async throws {
+        print("🚀 [Exporter] Starting AVAssetWriter export to \(job.outputUrl.path)...")
+        exportProgress = 0.0
+        let totalDuration = maxDuration != nil ? CMTimeMinimum(maxDuration!, job.duration) : job.duration
+        
+        let reader = try AVAssetReader(asset: job.composition)
+        let writer = try AVAssetWriter(outputURL: job.outputUrl, fileType: job.codec == .hevc ? .mp4 : .mov)
+        
+        // 1. Video Setup
+        let videoComp = job.videoComposition
+        let videoTracks = job.composition.tracks(withMediaType: .video)
+        let videoOutput = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+        ])
+        videoOutput.videoComposition = videoComp
+        if reader.canAdd(videoOutput) { reader.add(videoOutput) }
+        
+        var compressionProps: [String: Any] = [:]
+        if job.codec == .hevc {
+            compressionProps[AVVideoAverageBitRateKey as String] = job.bitrate.bitsPerSecond(for: job.resolution)
+            compressionProps[AVVideoProfileLevelKey as String] = kVTProfileLevel_HEVC_Main_AutoLevel
         }
         
-        await exporter.export()
-        progressTask.cancel()
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: job.codec.avVideoCodecType,
+            AVVideoWidthKey: job.resolution.size.width,
+            AVVideoHeightKey: job.resolution.size.height,
+            AVVideoCompressionPropertiesKey: compressionProps
+        ]
         
-        if exporter.status == .failed {
-            let err = exporter.error ?? NSError(domain: "ExportError", code: -1)
-            print("❌ [Exporter] Export failed: \(err.localizedDescription)")
-            if let underlyingError = (err as NSError).userInfo[NSUnderlyingErrorKey] as? Error {
-                print("   Debug: \(underlyingError.localizedDescription)")
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        videoInput.expectsMediaDataInRealTime = false
+        if writer.canAdd(videoInput) { writer.add(videoInput) }
+        
+        // 2. Audio Setup
+        let audioTracks = job.composition.tracks(withMediaType: .audio)
+        var audioOutput: AVAssetReaderAudioMixOutput?
+        var audioInput: AVAssetWriterInput?
+        
+        if !audioTracks.isEmpty {
+            audioOutput = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: nil)
+            if reader.canAdd(audioOutput!) { reader.add(audioOutput!) }
+            
+            var audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 192000
+            ]
+            
+            if job.codec == .prores {
+                // ProRes typical audio is LPCM
+                audioSettings = [
+                    AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: 48000,
+                    AVNumberOfChannelsKey: 2,
+                    AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsFloatKey: false,
+                    AVLinearPCMIsNonInterleaved: false
+                ]
             }
-            throw err
-        } else if exporter.status == .cancelled {
-            print("⚠️ [Exporter] Export cancelled.")
-        } else {
-            print("✅ [Exporter] Export successful! Saved to: \(outputUrl.path)")
-            self.exportProgress = 1.0
+            
+            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            audioInput?.expectsMediaDataInRealTime = false
+            if writer.canAdd(audioInput!) { writer.add(audioInput!) }
         }
+        
+        reader.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
+        
+        print("🚀 [Exporter] Starting read/write loop...")
+        writer.startWriting()
+        reader.startReading()
+        writer.startSession(atSourceTime: .zero)
+        
+        let dispatchGroup = DispatchGroup()
+        let videoQueue = DispatchQueue(label: "com.export.video")
+        let audioQueue = DispatchQueue(label: "com.export.audio")
+        
+        var exportError: Error?
+        
+        nonisolated(unsafe) let safeVideoInput = videoInput
+        nonisolated(unsafe) let safeVideoOutput = videoOutput
+        let durationSeconds = totalDuration.seconds
+        
+        dispatchGroup.enter()
+        safeVideoInput.requestMediaDataWhenReady(on: videoQueue) {
+            while safeVideoInput.isReadyForMoreMediaData {
+                if let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() {
+                    safeVideoInput.append(sampleBuffer)
+                    let pTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                    DispatchQueue.main.async {
+                        self.exportProgress = pTime.seconds / durationSeconds
+                    }
+                } else {
+                    safeVideoInput.markAsFinished()
+                    dispatchGroup.leave()
+                    break
+                }
+            }
+        }
+        
+        if let aInput = audioInput, let aOutput = audioOutput {
+            nonisolated(unsafe) let safeAudioInput = aInput
+            nonisolated(unsafe) let safeAudioOutput = aOutput
+            dispatchGroup.enter()
+            safeAudioInput.requestMediaDataWhenReady(on: audioQueue) {
+                while safeAudioInput.isReadyForMoreMediaData {
+                    if let sampleBuffer = safeAudioOutput.copyNextSampleBuffer() {
+                        safeAudioInput.append(sampleBuffer)
+                    } else {
+                        safeAudioInput.markAsFinished()
+                        dispatchGroup.leave()
+                        break
+                    }
+                }
+            }
+        }
+        
+        await withCheckedContinuation { continuation in
+            dispatchGroup.notify(queue: .main) {
+                continuation.resume()
+            }
+        }
+        
+        if reader.status == .failed { exportError = reader.error }
+        if writer.status == .failed { exportError = writer.error }
+        
+        if let error = exportError {
+            writer.cancelWriting()
+            print("❌ [Exporter] Export failed: \(error.localizedDescription)")
+            throw error
+        }
+        
+        await writer.finishWriting()
+        
+        print("✅ [Exporter] Export successful! Saved to: \(job.outputUrl.path)")
+        self.exportProgress = 1.0
     }
 }
