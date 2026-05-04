@@ -61,5 +61,5 @@ To verify the engine without the UI:
 - [x] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings.
 - [x] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.
 - [ ] **Spatial Audio (Ambisonics):** Proper mapping of GoPro's 4-channel ambisonic audio to a spatialized 360 soundscape.
-- [ ] **Keyframe Re-framing:** Implement a timeline to animate camera movements (Pan/Tilt) for cinematic exported shots.
+- [ ] **Close video file:** Allow user to close the video file and open new one(s) instead of shutting down the application to open a new video file.
 - [ ] **AI Super-Resolution:** Integrate CoreML for hardware-accelerated upscaling during the export pipeline.
