@@ -8,6 +8,11 @@ struct GPSData {
     let altitude: Double
     let speed: Double
     let speed3D: Double
+    // Raw accelerometer axes in m/s² (from ACCL stream)
+    // GoPro MAX orientation: X=lateral, Y=vertical, Z=longitudinal
+    var accelX: Double = 0.0
+    var accelY: Double = 0.0
+    var accelZ: Double = 0.0
 }
 
 class GPMFParser {
@@ -23,24 +28,55 @@ class GPMFParser {
         print("🗺 [GPMF] Found GoPro Metadata track. Processing \(samples.count) blocks...")
         
         var allGPSData: [GPSData] = []
+        var allAccelData: [AccelSample] = []
         var currentTime = CMTime(value: 0, timescale: Int32(timescale))
         
         for sample in samples {
             if let data = parser.readSampleData(sample: sample) {
-                // Parse the payload block, passing block duration for timestamp interpolation
                 let blockDuration = CMTime(value: Int64(sample.duration), timescale: Int32(timescale))
-                let blockGPS = parseGPMF(data: data, pts: currentTime, blockDuration: blockDuration)
+                let (blockGPS, blockAccel) = parseGPMF(data: data, pts: currentTime, blockDuration: blockDuration)
                 allGPSData.append(contentsOf: blockGPS)
+                allAccelData.append(contentsOf: blockAccel)
             }
             currentTime = CMTimeAdd(currentTime, CMTime(value: Int64(sample.duration), timescale: Int32(timescale)))
+        }
+        
+        // Merge accelerometer data onto GPS points by nearest timestamp
+        // ACCL runs at ~200Hz, GPS5 at ~18Hz — downsample ACCL to GPS timestamps
+        if !allAccelData.isEmpty {
+            var accelIdx = 0
+            for i in 0..<allGPSData.count {
+                let gpsTime = allGPSData[i].timestamp.seconds
+                // Advance accel index to nearest match
+                while accelIdx + 1 < allAccelData.count &&
+                      abs(allAccelData[accelIdx + 1].timestamp.seconds - gpsTime) <
+                      abs(allAccelData[accelIdx].timestamp.seconds - gpsTime) {
+                    accelIdx += 1
+                }
+                if accelIdx < allAccelData.count {
+                    let accel = allAccelData[accelIdx]
+                    allGPSData[i].accelX = accel.x
+                    allGPSData[i].accelY = accel.y
+                    allGPSData[i].accelZ = accel.z
+                }
+            }
+            print("📐 [GPMF] Merged \(allAccelData.count) accelerometer samples onto \(allGPSData.count) GPS points.")
         }
         
         print("✅ [GPMF] Extraction finished. Found \(allGPSData.count) GPS points.")
         return allGPSData
     }
     
-    private func parseGPMF(data: Data, pts: CMTime, blockDuration: CMTime) -> [GPSData] {
-        var results: [GPSData] = []
+    private struct AccelSample {
+        let timestamp: CMTime
+        let x: Double
+        let y: Double
+        let z: Double
+    }
+    
+    private func parseGPMF(data: Data, pts: CMTime, blockDuration: CMTime) -> ([GPSData], [AccelSample]) {
+        var gpsResults: [GPSData] = []
+        var accelResults: [AccelSample] = []
         
         // GPMF is KLV: Key(4), Type(1), Size(1), Count(2) -> 8 bytes
         var currentScales: [Int32] = []
@@ -74,6 +110,7 @@ class GPMFParser {
                         }
                     }
                     
+                    // GPS5: lat, lon, alt, speed2d, speed3d (5 x Int32 = 20 bytes per sample)
                     if keyStr == "GPS5" && typeChar == "l" && size == 20 {
                         let numSamples = count
                         if numSamples > 0 && currentScales.count >= 5 {
@@ -91,7 +128,6 @@ class GPMFParser {
                                 let fspeed = Double(speed2d) / Double(currentScales[3])
                                 let fspeed3d = Double(speed3d) / Double(currentScales[4])
                                 
-                                // Interpolate timestamp within the block so each sample gets a distinct time
                                 let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
                                 let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
                                 
@@ -102,7 +138,33 @@ class GPMFParser {
                                     speed: fspeed,
                                     speed3D: fspeed3d
                                 )
-                                results.append(gpsData)
+                                gpsResults.append(gpsData)
+                            }
+                        }
+                    }
+                    
+                    // ACCL: 3-axis accelerometer (3 x Int16 = 6 bytes per sample)
+                    if keyStr == "ACCL" && typeChar == "s" && size == 6 {
+                        let numSamples = count
+                        // ACCL uses the most recent SCAL (typically a single value)
+                        let accelScale = currentScales.first.map { Double($0) } ?? 1.0
+                        if numSamples > 0 {
+                            for j in 0..<numSamples {
+                                let start = i + j * 6
+                                guard start + 6 <= end else { break }
+                                let ax = data[start..<start+2].withUnsafeBytes { $0.loadUnaligned(as: Int16.self).bigEndian }
+                                let ay = data[start+2..<start+4].withUnsafeBytes { $0.loadUnaligned(as: Int16.self).bigEndian }
+                                let az = data[start+4..<start+6].withUnsafeBytes { $0.loadUnaligned(as: Int16.self).bigEndian }
+                                
+                                let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
+                                let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
+                                
+                                accelResults.append(AccelSample(
+                                    timestamp: sampleTime,
+                                    x: Double(ax) / accelScale,
+                                    y: Double(ay) / accelScale,
+                                    z: Double(az) / accelScale
+                                ))
                             }
                         }
                     }
@@ -113,6 +175,6 @@ class GPMFParser {
         }
         
         parseKLV(offset: 0, length: data.count)
-        return results
+        return (gpsResults, accelResults)
     }
 }
