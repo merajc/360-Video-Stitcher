@@ -183,10 +183,52 @@ struct ContentView: View {
                             .padding(.top, 40)
                             .padding(.bottom, 20)
                             
-                            // Seekbar
-                            Seekbar(processor: processor)
+                            // Seekbar + Transport Controls
+                            VStack(spacing: 12) {
+                                HStack(spacing: 20) {
+                                    // Close File
+                                    Button(action: {
+                                        processor.closeFile()
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.white.opacity(0.6))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Close File")
+                                    
+                                    Spacer()
+                                    
+                                    // Play/Pause
+                                    Button(action: {
+                                        processor.togglePlayback()
+                                    }) {
+                                        Image(systemName: processor.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                            .font(.system(size: 36))
+                                            .foregroundStyle(.linearGradient(colors: [.blue, .purple], startPoint: .top, endPoint: .bottom))
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    Spacer()
+                                    
+                                    // Spatial Audio indicator
+                                    HStack(spacing: 4) {
+                                        Image(systemName: processor.exportSpatialAudio ? "hifispeaker.and.homepodmini.fill" : "speaker.2.fill")
+                                            .font(.caption)
+                                        Text(processor.exportSpatialAudio ? "Spatial" : "Stereo")
+                                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    }
+                                    .foregroundColor(processor.exportSpatialAudio ? .cyan : .secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(Color.white.opacity(0.1)))
+                                }
                                 .frame(width: 400)
-                                .padding(.bottom, 40)
+                                
+                                Seekbar(processor: processor)
+                                    .frame(width: 400)
+                            }
+                            .padding(.bottom, 40)
                         }
                     } else {
                         VStack(spacing: 15) {
@@ -303,6 +345,11 @@ struct ContentView: View {
                             
                             Toggle("Spatial Audio (Ambisonics)", isOn: $processor.exportSpatialAudio)
                                 .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                .onChange(of: processor.exportSpatialAudio) { _, _ in
+                                    Task {
+                                        await processor.reloadAudioTrack()
+                                    }
+                                }
                         }
                         .pickerStyle(MenuPickerStyle())
                         

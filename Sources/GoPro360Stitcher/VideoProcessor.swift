@@ -67,11 +67,15 @@ class VideoProcessor: ObservableObject {
     @Published var error: Error?
     @Published var exportProgress: Double = 0.0
     @Published var isExporting: Bool = false
+    @Published var isPlaying: Bool = false
     
     @Published var exportResolution: ExportResolution = .uhd4k
     @Published var exportCodec: ExportCodec = .hevc
     @Published var exportBitrate: ExportBitrate = .high
     @Published var exportSpatialAudio: Bool = true
+    
+    /// Remember loaded file URLs so we can reload when toggling audio tracks or closing/reopening
+    private(set) var loadedURLs: [URL] = []
     
     // Reframing Parameters - Top View
     @Published var topPan: Double = UserDefaults.standard.object(forKey: "topPan") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topPan, forKey: "topPan") } }
@@ -95,6 +99,9 @@ class VideoProcessor: ObservableObject {
     func processFiles(urls: [URL]) async {
         isLoading = true
         defer { isLoading = false }
+        
+        // Store URLs for reloading
+        self.loadedURLs = urls
         
         print("📽 [Processor] Starting ingestion of \(urls.count) items...")
         
@@ -143,8 +150,54 @@ class VideoProcessor: ObservableObject {
             self.error = error
             print("❌ [Processor] Error processing files: \(error.localizedDescription)")
         }
+    }
+    
+    // MARK: - Playback Controls
+    
+    func togglePlayback() {
+        guard let player = player else { return }
+        if isPlaying {
+            player.pause()
+        } else {
+            player.play()
+        }
+        isPlaying.toggle()
+    }
+    
+    func closeFile() {
+        player?.pause()
+        player = nil
+        composition = nil
+        videoComposition = nil
+        isPlaying = false
+        loadedURLs = []
+        telemetry.trackPoints = []
+        extractedTelemetry = []
+        batchQueue = []
+        error = nil
+        exportProgress = 0.0
+        print("📁 [Processor] File closed. Ready for new files.")
+    }
+    
+    /// Reload the composition with the current spatial audio setting, preserving playback position
+    func reloadAudioTrack() async {
+        guard !loadedURLs.isEmpty else { return }
+        let savedTime = player?.currentTime() ?? .zero
+        let wasPlaying = isPlaying
         
-        // Release security scoping later if needed, but for AVAsset it's safer to keep active during processing
+        player?.pause()
+        isPlaying = false
+        
+        await processFiles(urls: loadedURLs)
+        
+        // Restore playback position
+        if let player = player {
+            await player.seek(to: savedTime, toleranceBefore: .zero, toleranceAfter: .zero)
+            if wasPlaying {
+                player.play()
+                isPlaying = true
+            }
+        }
     }
     
     private func sortFilesByCreationDate(urls: [URL]) throws -> [URL] {
