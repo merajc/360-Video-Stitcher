@@ -3,6 +3,7 @@ import SwiftUI
 import AVFoundation
 import CoreLocation
 import VideoToolbox
+import CoreImage
 
 enum ExportResolution: String, CaseIterable, Identifiable {
     case hd1080 = "1080p (HD)"
@@ -57,6 +58,11 @@ enum ExportBitrate: String, CaseIterable, Identifiable {
     }
 }
 
+final class UnsafeImageContainer: @unchecked Sendable {
+    var image: CGImage?
+}
+
+
 @MainActor
 class VideoProcessor: ObservableObject {
     @Published var composition: AVMutableComposition?
@@ -73,6 +79,14 @@ class VideoProcessor: ObservableObject {
     @Published var exportCodec: ExportCodec = .hevc
     @Published var exportBitrate: ExportBitrate = .high
     @Published var exportSpatialAudio: Bool = true
+    
+    // Telemetry display states
+    @Published var showTrackMap = true
+    @Published var showTelemetryDashboard = true
+    @Published var showSpeedGauge = true
+    @Published var showAltitudeGauge = true
+    @Published var showGForceGauge = true
+    @Published var telemetryScale: Double = UserDefaults.standard.object(forKey: "telemetryScale") as? Double ?? 1.0 { didSet { UserDefaults.standard.set(telemetryScale, forKey: "telemetryScale") } }
     
     /// Remember loaded file URLs so we can reload when toggling audio tracks or closing/reopening
     private(set) var loadedURLs: [URL] = []
@@ -490,6 +504,16 @@ class VideoProcessor: ObservableObject {
         
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         videoInput.expectsMediaDataInRealTime = false
+        
+        let pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: Int(job.resolution.size.width),
+                kCVPixelBufferHeightKey as String: Int(job.resolution.size.height)
+            ]
+        )
+        
         if writer.canAdd(videoInput) { writer.add(videoInput) }
         
         // 2. Audio Setup
@@ -576,13 +600,76 @@ class VideoProcessor: ObservableObject {
         let durationSeconds = totalDuration.seconds
         
         dispatchGroup.enter()
+        
+        let ciContext = CIContext(options: [.cacheIntermediates: false])
+        nonisolated(unsafe) let safePixelBufferAdaptor = pixelBufferAdaptor
+        let localShowTrackMap = self.showTrackMap
+        let localShowDashboard = self.showTelemetryDashboard
+        let localShowSpeed = self.showSpeedGauge
+        let localShowAlt = self.showAltitudeGauge
+        let localShowGForce = self.showGForceGauge
+        let localScale = self.telemetryScale
+        let localRes = job.resolution.size
+        
         safeVideoInput.requestMediaDataWhenReady(on: videoQueue) {
             while safeVideoInput.isReadyForMoreMediaData {
                 if let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() {
-                    safeVideoInput.append(sampleBuffer)
                     let pTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                    let pTimeSeconds = pTime.seconds
+                    
+                    var appended = false
+                    
+                    if localShowTrackMap || localShowDashboard {
+                        if let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                            let imageContainer = UnsafeImageContainer()
+                            
+                            let semaphore = DispatchSemaphore(value: 0)
+                            Task { @MainActor in
+                                self.telemetry.updateCurrentTime(pTimeSeconds)
+                                let overlayView = ExportOverlayView(
+                                    telemetry: self.telemetry,
+                                    currentTime: pTimeSeconds,
+                                    size: localRes,
+                                    showTrackMap: localShowTrackMap,
+                                    showDashboard: localShowDashboard,
+                                    showSpeed: localShowSpeed,
+                                    showAltitude: localShowAlt,
+                                    showGForce: localShowGForce,
+                                    scale: localScale
+                                )
+                                let renderer = ImageRenderer(content: overlayView)
+                                renderer.scale = 1.0
+                                renderer.proposedSize = .init(width: localRes.width, height: localRes.height)
+                                imageContainer.image = renderer.cgImage
+                                semaphore.signal()
+                            }
+                            semaphore.wait()
+                            
+                            if let overlayCGImage = imageContainer.image, let pool = safePixelBufferAdaptor.pixelBufferPool {
+                                var newPixelBuffer: CVPixelBuffer?
+                                CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
+                                if let newPixelBuffer = newPixelBuffer {
+                                    let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
+                                    
+                                    // CIImage from CGImage correctly aligns with CVPixelBuffer automatically.
+                                    let fgImage = CIImage(cgImage: overlayCGImage)
+                                    
+                                    let composite = fgImage.composited(over: bgImage)
+                                    ciContext.render(composite, to: newPixelBuffer)
+                                    
+                                    safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime)
+                                    appended = true
+                                }
+                            }
+                        }
+                    }
+                    
+                    if !appended {
+                        safeVideoInput.append(sampleBuffer)
+                    }
+                    
                     DispatchQueue.main.async {
-                        self.exportProgress = pTime.seconds / durationSeconds
+                        self.exportProgress = pTimeSeconds / durationSeconds
                     }
                 } else {
                     safeVideoInput.markAsFinished()

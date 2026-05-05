@@ -111,7 +111,33 @@ class TelemetryProcessor: ObservableObject {
             )
         }
         
-        self.trackPoints = smoothedPoints
+        // Filter out extreme geographical jumps and Null Island anomalies
+        var validSmoothedPoints = [GPSPoint]()
+        
+        let validCoords = smoothedPoints.filter { abs($0.latitude) >= 0.01 || abs($0.longitude) >= 0.01 }
+        
+        if validCoords.isEmpty {
+            self.trackPoints = []
+            return
+        }
+        
+        // Calculate median latitude and longitude to use as robust center
+        let sortedLats = validCoords.map { $0.latitude }.sorted()
+        let sortedLons = validCoords.map { $0.longitude }.sorted()
+        let medianLat = sortedLats[sortedLats.count / 2]
+        let medianLon = sortedLons[sortedLons.count / 2]
+        
+        for point in validCoords {
+            // Filter out points more than 0.5 degrees away (~55km) from the median of the trip
+            // This removes cached GPS locations from previous sessions that suddenly jump
+            if abs(point.latitude - medianLat) > 0.5 || abs(point.longitude - medianLon) > 0.5 {
+                continue
+            }
+            
+            validSmoothedPoints.append(point)
+        }
+        
+        self.trackPoints = validSmoothedPoints
         self.calculateBounds()
         
         // Diagnostic: show G-force range to verify non-zero dynamic values
@@ -144,23 +170,7 @@ class TelemetryProcessor: ObservableObject {
     }
     
     private func calculateBounds() {
-        guard !trackPoints.isEmpty else { return }
-        
-        // 1. Filter out coordinates too close to 0,0 (Null Island anomalies)
-        var validPoints = trackPoints.filter { abs($0.latitude) > 0.01 || abs($0.longitude) > 0.01 }
-        guard !validPoints.isEmpty else { return }
-        
-        // 2. Filter out extreme geographical jumps (e.g. cached GPS locations from a previous session)
-        if validPoints.count > 10 {
-            let sortedLats = validPoints.map { $0.latitude }.sorted()
-            let sortedLons = validPoints.map { $0.longitude }.sorted()
-            let medianLat = sortedLats[sortedLats.count / 2]
-            let medianLon = sortedLons[sortedLons.count / 2]
-            
-            // Allow ~100km radius from median. Continuous GoPro recording won't travel >100km in 5 min.
-            validPoints = validPoints.filter { abs($0.latitude - medianLat) < 1.0 && abs($0.longitude - medianLon) < 1.0 }
-        }
-        
+        let validPoints = trackPoints
         guard !validPoints.isEmpty else { return }
         
         var tempMinLat = validPoints.map { $0.latitude }.min() ?? 0

@@ -22,7 +22,7 @@ struct TelemetryDashboardView: View {
                 )
             }
         }
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(width: 280, height: 150)
         .padding(12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -128,7 +128,7 @@ struct GForceBubble: View {
                 GAxisLabel(axis: "VRT", value: vertical, color: .purple)
             }
         }
-        .frame(width: 120)
+        .frame(width: 120, height: 135)
     }
 }
 
@@ -200,6 +200,6 @@ struct TelemetryGauge: View {
             }
             .frame(width: 50, height: 50)
         }
-        .frame(width: 55)
+        .frame(width: 55, height: 75)
     }
 }

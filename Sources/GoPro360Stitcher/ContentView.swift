@@ -103,13 +103,7 @@ struct Seekbar: View {
 struct ContentView: View {
     @State private var isTargeted = false
     @StateObject private var processor = VideoProcessor()
-    @State private var showTrackMap = true
-    @State private var showTelemetryDashboard = true
-    @State private var showSpeedGauge = true
-    @State private var showAltitudeGauge = true
-    @State private var showGForceGauge = true
     @State private var currentTime: Double = 0
-    @AppStorage("telemetryScale") private var telemetryScale: Double = 1.0
     
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
     
@@ -166,7 +160,7 @@ struct ContentView: View {
                                             .cornerRadius(6)
                                         Spacer()
                                         
-                                        if showTrackMap {
+                                        if processor.showTrackMap {
                                             TrackMapView(telemetry: processor.telemetry, currentTime: currentTime)
                                                 .frame(width: 100, height: 100)
                                                 .background(Color.black.opacity(0.3))
@@ -175,14 +169,14 @@ struct ContentView: View {
                                         }
                                     }
                                     Spacer()
-                                    if showTelemetryDashboard && !processor.telemetry.trackPoints.isEmpty {
+                                    if processor.showTelemetryDashboard && !processor.telemetry.trackPoints.isEmpty {
                                         TelemetryDashboardView(
                                             telemetry: processor.telemetry,
-                                            showSpeed: showSpeedGauge,
-                                            showAltitude: showAltitudeGauge,
-                                            showGForce: showGForceGauge
+                                            showSpeed: processor.showSpeedGauge,
+                                            showAltitude: processor.showAltitudeGauge,
+                                            showGForce: processor.showGForceGauge
                                         )
-                                            .scaleEffect(telemetryScale, anchor: .bottomTrailing)
+                                            .scaleEffect(processor.telemetryScale, anchor: .bottomTrailing)
                                             .padding(.bottom, 20)
                                     }
                                 }
@@ -334,21 +328,21 @@ struct ContentView: View {
                                 .kerning(2)
                                 .foregroundColor(.secondary)
                             
-                            Toggle("GPS TRACK MAP", isOn: $showTrackMap)
-                                .toggleStyle(SwitchToggleStyle(tint: .blue))
-                                
-                            Toggle("TELEMETRY DASHBOARD", isOn: $showTelemetryDashboard)
-                                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            Toggle("GPS TRACK MAP", isOn: $processor.showTrackMap)
+                                .font(.headline)
                             
-                            if showTelemetryDashboard {
+                            Toggle("TELEMETRY DASHBOARD", isOn: $processor.showTelemetryDashboard)
+                                .font(.headline)
+                            
+                            if processor.showTelemetryDashboard {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Toggle("Speed", isOn: $showSpeedGauge)
-                                        .toggleStyle(SwitchToggleStyle(tint: .cyan))
-                                        .font(.caption)
-                                    Toggle("Altitude", isOn: $showAltitudeGauge)
-                                        .toggleStyle(SwitchToggleStyle(tint: .cyan))
-                                        .font(.caption)
-                                    Toggle("G-Force", isOn: $showGForceGauge)
+                                    Toggle("Speed", isOn: $processor.showSpeedGauge)
+                                        .controlSize(.mini)
+                                    
+                                    Toggle("Altitude", isOn: $processor.showAltitudeGauge)
+                                        .controlSize(.mini)
+                                    
+                                    Toggle("G-Force", isOn: $processor.showGForceGauge)
                                         .toggleStyle(SwitchToggleStyle(tint: .cyan))
                                         .font(.caption)
                                     
@@ -356,7 +350,7 @@ struct ContentView: View {
                                         Text("Scale")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
-                                        Slider(value: $telemetryScale, in: 0.5...2.0)
+                                        Slider(value: $processor.telemetryScale, in: 0.1...3.0)
                                             .tint(.cyan)
                                     }
                                     .padding(.top, 4)
