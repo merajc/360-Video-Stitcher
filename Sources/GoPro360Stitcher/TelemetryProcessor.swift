@@ -145,9 +145,42 @@ class TelemetryProcessor: ObservableObject {
     
     private func calculateBounds() {
         guard !trackPoints.isEmpty else { return }
-        minLat = trackPoints.map { $0.latitude }.min() ?? 0
-        maxLat = trackPoints.map { $0.latitude }.max() ?? 0
-        minLon = trackPoints.map { $0.longitude }.min() ?? 0
-        maxLon = trackPoints.map { $0.longitude }.max() ?? 0
+        
+        // 1. Filter out coordinates too close to 0,0 (Null Island anomalies)
+        var validPoints = trackPoints.filter { abs($0.latitude) > 0.01 || abs($0.longitude) > 0.01 }
+        guard !validPoints.isEmpty else { return }
+        
+        // 2. Filter out extreme geographical jumps (e.g. cached GPS locations from a previous session)
+        if validPoints.count > 10 {
+            let sortedLats = validPoints.map { $0.latitude }.sorted()
+            let sortedLons = validPoints.map { $0.longitude }.sorted()
+            let medianLat = sortedLats[sortedLats.count / 2]
+            let medianLon = sortedLons[sortedLons.count / 2]
+            
+            // Allow ~100km radius from median. Continuous GoPro recording won't travel >100km in 5 min.
+            validPoints = validPoints.filter { abs($0.latitude - medianLat) < 1.0 && abs($0.longitude - medianLon) < 1.0 }
+        }
+        
+        guard !validPoints.isEmpty else { return }
+        
+        var tempMinLat = validPoints.map { $0.latitude }.min() ?? 0
+        var tempMaxLat = validPoints.map { $0.latitude }.max() ?? 0
+        var tempMinLon = validPoints.map { $0.longitude }.min() ?? 0
+        var tempMaxLon = validPoints.map { $0.longitude }.max() ?? 0
+        
+        // Prevent flat-line scaling issues if track is perfectly straight or stationary
+        if tempMaxLat - tempMinLat < 0.0001 {
+            tempMaxLat += 0.0001
+            tempMinLat -= 0.0001
+        }
+        if tempMaxLon - tempMinLon < 0.0001 {
+            tempMaxLon += 0.0001
+            tempMinLon -= 0.0001
+        }
+        
+        self.minLat = tempMinLat
+        self.maxLat = tempMaxLat
+        self.minLon = tempMinLon
+        self.maxLon = tempMaxLon
     }
 }

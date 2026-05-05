@@ -142,8 +142,8 @@ class GPMFParser {
                                 let fspeed = Double(speed2d) / Double(currentScales[3])
                                 let fspeed3d = Double(speed3d) / Double(currentScales[4])
                                 
-                                // Ignore points with no valid GPS lock (typically 0.0, 0.0)
-                                if flat != 0.0 || flon != 0.0 {
+                                // Ignore points with no valid GPS lock (typically near 0.0, 0.0 or poles)
+                                if (abs(flat) > 0.01 || abs(flon) > 0.01) && abs(flat) < 89.9 {
                                     let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
                                     let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
                                     

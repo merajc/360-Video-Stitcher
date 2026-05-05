@@ -22,6 +22,7 @@ struct TelemetryDashboardView: View {
                 )
             }
         }
+        .fixedSize(horizontal: true, vertical: true)
         .padding(12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -127,6 +128,7 @@ struct GForceBubble: View {
                 GAxisLabel(axis: "VRT", value: vertical, color: .purple)
             }
         }
+        .frame(width: 120)
     }
 }
 
