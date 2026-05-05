@@ -82,12 +82,16 @@ class VideoProcessor: ObservableObject {
     @Published var topTilt: Double = UserDefaults.standard.object(forKey: "topTilt") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topTilt, forKey: "topTilt") } }
     @Published var topRoll: Double = UserDefaults.standard.object(forKey: "topRoll") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(topRoll, forKey: "topRoll") } }
     @Published var topFOV: Double = UserDefaults.standard.object(forKey: "topFOV") as? Double ?? 90 { didSet { updateVideoComposition(); UserDefaults.standard.set(topFOV, forKey: "topFOV") } }
+    @Published var topFlipH: Bool = UserDefaults.standard.bool(forKey: "topFlipH") { didSet { updateVideoComposition(); UserDefaults.standard.set(topFlipH, forKey: "topFlipH") } }
+    @Published var topFlipV: Bool = UserDefaults.standard.bool(forKey: "topFlipV") { didSet { updateVideoComposition(); UserDefaults.standard.set(topFlipV, forKey: "topFlipV") } }
     
     // Reframing Parameters - Bottom View
     @Published var bottomPan: Double = UserDefaults.standard.object(forKey: "bottomPan") as? Double ?? 180 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomPan, forKey: "bottomPan") } }
     @Published var bottomTilt: Double = UserDefaults.standard.object(forKey: "bottomTilt") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomTilt, forKey: "bottomTilt") } }
     @Published var bottomRoll: Double = UserDefaults.standard.object(forKey: "bottomRoll") as? Double ?? 0 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomRoll, forKey: "bottomRoll") } }
     @Published var bottomFOV: Double = UserDefaults.standard.object(forKey: "bottomFOV") as? Double ?? 90 { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomFOV, forKey: "bottomFOV") } }
+    @Published var bottomFlipH: Bool = UserDefaults.standard.bool(forKey: "bottomFlipH") { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomFlipH, forKey: "bottomFlipH") } }
+    @Published var bottomFlipV: Bool = UserDefaults.standard.bool(forKey: "bottomFlipV") { didSet { updateVideoComposition(); UserDefaults.standard.set(bottomFlipV, forKey: "bottomFlipV") } }
     
     // Batch queue
     @Published var batchQueue: [ExportJob] = []
@@ -170,6 +174,9 @@ class VideoProcessor: ObservableObject {
                 
                 print("   ↳ \(chapterPoints.count) points (cumulative offset: \(String(format: "%.1f", timeOffset))s)")
             }
+            
+            // Ensure all points are strictly sorted chronologically across chapters
+            allPoints.sort { $0.timestamp.seconds < $1.timestamp.seconds }
             
             self.telemetry.loadTelemetry(allPoints)
             self.extractedTelemetry = allPoints.map { $0.coordinate }
@@ -381,11 +388,15 @@ class VideoProcessor: ObservableObject {
         instruction.topTilt = Float(topTilt)
         instruction.topRoll = Float(topRoll)
         instruction.topFOV = Float(topFOV)
+        instruction.topFlipH = topFlipH
+        instruction.topFlipV = topFlipV
         
         instruction.bottomPan = Float(bottomPan)
         instruction.bottomTilt = Float(bottomTilt)
         instruction.bottomRoll = Float(bottomRoll)
         instruction.bottomFOV = Float(bottomFOV)
+        instruction.bottomFlipH = bottomFlipH
+        instruction.bottomFlipV = bottomFlipV
         
         videoComposition.instructions = [instruction]
         return videoComposition

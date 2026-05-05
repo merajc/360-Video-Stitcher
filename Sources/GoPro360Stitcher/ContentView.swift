@@ -109,6 +109,7 @@ struct ContentView: View {
     @State private var showAltitudeGauge = true
     @State private var showGForceGauge = true
     @State private var currentTime: Double = 0
+    @AppStorage("telemetryScale") private var telemetryScale: Double = 1.0
     
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
     
@@ -181,6 +182,7 @@ struct ContentView: View {
                                             showAltitude: showAltitudeGauge,
                                             showGForce: showGForceGauge
                                         )
+                                            .scaleEffect(telemetryScale, anchor: .bottomTrailing)
                                             .padding(.bottom, 20)
                                     }
                                 }
@@ -289,6 +291,14 @@ struct ContentView: View {
                             ControlSlider(label: "TILT", value: $processor.topTilt, range: -90...90, unit: "°")
                             ControlSlider(label: "ROLL", value: $processor.topRoll, range: -180...180, unit: "°")
                             ControlSlider(label: "ZOOM", value: $processor.topFOV, range: 40...160, unit: "°")
+                            
+                            HStack {
+                                Toggle("FLIP HORIZONTAL", isOn: $processor.topFlipH)
+                                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                Toggle("FLIP VERTICAL", isOn: $processor.topFlipV)
+                                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            }
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
                         }
                         .padding(.top, 10)
                         
@@ -306,6 +316,14 @@ struct ContentView: View {
                             ControlSlider(label: "TILT", value: $processor.bottomTilt, range: -90...90, unit: "°")
                             ControlSlider(label: "ROLL", value: $processor.bottomRoll, range: -180...180, unit: "°")
                             ControlSlider(label: "ZOOM", value: $processor.bottomFOV, range: 40...160, unit: "°")
+                            
+                            HStack {
+                                Toggle("FLIP HORIZONTAL", isOn: $processor.bottomFlipH)
+                                    .toggleStyle(SwitchToggleStyle(tint: .purple))
+                                Toggle("FLIP VERTICAL", isOn: $processor.bottomFlipV)
+                                    .toggleStyle(SwitchToggleStyle(tint: .purple))
+                            }
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
                         }
                         
                         Divider().opacity(0.2)
@@ -333,6 +351,15 @@ struct ContentView: View {
                                     Toggle("G-Force", isOn: $showGForceGauge)
                                         .toggleStyle(SwitchToggleStyle(tint: .cyan))
                                         .font(.caption)
+                                    
+                                    HStack {
+                                        Text("Scale")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Slider(value: $telemetryScale, in: 0.5...2.0)
+                                            .tint(.cyan)
+                                    }
+                                    .padding(.top, 4)
                                 }
                                 .padding(.leading, 12)
                             }

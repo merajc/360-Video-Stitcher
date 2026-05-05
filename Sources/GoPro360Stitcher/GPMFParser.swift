@@ -41,6 +41,10 @@ class GPMFParser {
             currentTime = CMTimeAdd(currentTime, CMTime(value: Int64(sample.duration), timescale: Int32(timescale)))
         }
         
+        // Sort to ensure monotonic timestamps before merging
+        allGPSData.sort { $0.timestamp.seconds < $1.timestamp.seconds }
+        allAccelData.sort { $0.timestamp.seconds < $1.timestamp.seconds }
+        
         // Merge accelerometer data onto GPS points by nearest timestamp
         // ACCL runs at ~200Hz, GPS5 at ~18Hz — downsample ACCL to GPS timestamps
         if !allAccelData.isEmpty {
@@ -49,7 +53,7 @@ class GPMFParser {
                 let gpsTime = allGPSData[i].timestamp.seconds
                 // Advance accel index to nearest match
                 while accelIdx + 1 < allAccelData.count &&
-                      abs(allAccelData[accelIdx + 1].timestamp.seconds - gpsTime) <
+                      abs(allAccelData[accelIdx + 1].timestamp.seconds - gpsTime) <=
                       abs(allAccelData[accelIdx].timestamp.seconds - gpsTime) {
                     accelIdx += 1
                 }
@@ -60,7 +64,7 @@ class GPMFParser {
                     allGPSData[i].accelZ = accel.z
                 }
             }
-            print("📐 [GPMF] Merged \(allAccelData.count) accelerometer samples onto \(allGPSData.count) GPS points.")
+            print("📐 [GPMF] Merged \(allAccelData.count) ACCL → \(allGPSData.count) GPS. First ACCL raw: x=\(String(format: "%.2f", allAccelData[0].x)) y=\(String(format: "%.2f", allAccelData[0].y)) z=\(String(format: "%.2f", allAccelData[0].z)). First GPS.accel: x=\(String(format: "%.2f", allGPSData[0].accelX)) y=\(String(format: "%.2f", allGPSData[0].accelY)) z=\(String(format: "%.2f", allGPSData[0].accelZ))")
         }
         
         print("✅ [GPMF] Extraction finished. Found \(allGPSData.count) GPS points.")
@@ -138,17 +142,20 @@ class GPMFParser {
                                 let fspeed = Double(speed2d) / Double(currentScales[3])
                                 let fspeed3d = Double(speed3d) / Double(currentScales[4])
                                 
-                                let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
-                                let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
-                                
-                                let gpsData = GPSData(
-                                    timestamp: sampleTime,
-                                    coordinate: CLLocationCoordinate2D(latitude: flat, longitude: flon),
-                                    altitude: falt,
-                                    speed: fspeed,
-                                    speed3D: fspeed3d
-                                )
-                                gpsResults.append(gpsData)
+                                // Ignore points with no valid GPS lock (typically 0.0, 0.0)
+                                if flat != 0.0 || flon != 0.0 {
+                                    let fraction = numSamples > 1 ? Double(j) / Double(numSamples - 1) : 0.0
+                                    let sampleTime = CMTimeAdd(pts, CMTimeMultiplyByFloat64(blockDuration, multiplier: fraction))
+                                    
+                                    let gpsData = GPSData(
+                                        timestamp: sampleTime,
+                                        coordinate: CLLocationCoordinate2D(latitude: flat, longitude: flon),
+                                        altitude: falt,
+                                        speed: fspeed,
+                                        speed3D: fspeed3d
+                                    )
+                                    gpsResults.append(gpsData)
+                                }
                             }
                         }
                     }

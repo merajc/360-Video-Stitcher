@@ -46,7 +46,7 @@ class EACRenderer {
         }
     }
     
-    func renderStacked(front: CVPixelBuffer, rear: CVPixelBuffer, to output: CVPixelBuffer, topParams: SIMD4<Float>, bottomParams: SIMD4<Float>) {
+    func renderStacked(front: CVPixelBuffer, rear: CVPixelBuffer, to output: CVPixelBuffer, topParams: SIMD4<Float>, bottomParams: SIMD4<Float>, flipFlags: SIMD4<Float> = SIMD4<Float>(0,0,0,0)) {
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder(),
               let textureOutput = makeTexture(from: output),
@@ -68,8 +68,11 @@ class EACRenderer {
         bParams.z *= .pi/180 // roll
         bParams.w *= .pi/180 // fov
         
+        var flags = flipFlags // 0.0 or 1.0 flags — no conversion needed
+        
         encoder.setBytes(&tParams, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
         encoder.setBytes(&bParams, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
+        encoder.setBytes(&flags, length: MemoryLayout<SIMD4<Float>>.size, index: 2)
         
         encoder.setTexture(textureFront, index: 0)
         encoder.setTexture(textureRear, index: 1)

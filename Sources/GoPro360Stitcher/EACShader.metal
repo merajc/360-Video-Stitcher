@@ -118,6 +118,7 @@ kernel void renderStackedView(texture2d<float, access::sample> track0 [[texture(
                             texture2d<float, access::write> outTexture [[texture(2)]],
                             constant float4& topParams [[buffer(0)]],
                             constant float4& bottomParams [[buffer(1)]],
+                            constant float4& flipFlags [[buffer(2)]],
                             uint2 gid [[thread_position_in_grid]]) {
                             
     if (gid.x >= outTexture.get_width() || gid.y >= outTexture.get_height()) return;
@@ -130,12 +131,20 @@ kernel void renderStackedView(texture2d<float, access::sample> track0 [[texture(
     float localY = isBottom ? gid.y - midY : gid.y;
     float4 params = isBottom ? bottomParams : topParams;
     
+    // flipFlags: x=topFlipH, y=topFlipV, z=bottomFlipH, w=bottomFlipV
+    bool flipH = isBottom ? (flipFlags.z > 0.5) : (flipFlags.x > 0.5);
+    bool flipV = isBottom ? (flipFlags.w > 0.5) : (flipFlags.y > 0.5);
+    
     float3 userEuler = params.xyz;
     float fov = params.w;
     
     // Normalized device coordinates (-1 to 1)
     float2 uv = float2(gid.x, localY) / float2(width, midY) * 2.0 - 1.0;
     uv.y = -uv.y;
+    
+    // Apply per-axis flip
+    if (flipH) uv.x = -uv.x;
+    if (flipV) uv.y = -uv.y;
     
     float windowAspect = width / midY;
     uv.x *= windowAspect;

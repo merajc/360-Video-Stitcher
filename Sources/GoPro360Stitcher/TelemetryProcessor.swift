@@ -37,15 +37,40 @@ class TelemetryProcessor: ObservableObject {
         print("🛰 [Telemetry] Processing \(rawData.count) native GPS data points...")
         var newPoints: [GPSPoint] = []
         
+        // Debug: verify incoming accel data
+        if let first = rawData.first {
+            print("🔬 [Telemetry] First incoming point: accelX=\(String(format: "%.2f", first.accelX)) accelY=\(String(format: "%.2f", first.accelY)) accelZ=\(String(format: "%.2f", first.accelZ)) m/s², ts=\(String(format: "%.3f", first.timestamp.seconds))s")
+        }
+        
+        // Step 1: Detect gravity bias by averaging first 5 seconds of IMU data
+        // At low speed, the dominant axis reading is gravity (~9.8 m/s²)
+        let biasWindow = rawData.prefix(while: { $0.timestamp.seconds < rawData.first!.timestamp.seconds + 5.0 })
+        var biasX = 0.0, biasY = 0.0, biasZ = 0.0
+        if !biasWindow.isEmpty {
+            biasX = biasWindow.map { $0.accelX }.reduce(0, +) / Double(biasWindow.count)
+            biasY = biasWindow.map { $0.accelY }.reduce(0, +) / Double(biasWindow.count)
+            biasZ = biasWindow.map { $0.accelZ }.reduce(0, +) / Double(biasWindow.count)
+            print("🧲 [Telemetry] Gravity bias (m/s²): X=\(String(format: "%.2f", biasX)) Y=\(String(format: "%.2f", biasY)) Z=\(String(format: "%.2f", biasZ))")
+            
+            // Identify gravity axis (largest absolute average)
+            let absAxes = [abs(biasX), abs(biasY), abs(biasZ)]
+            let gravityAxis = absAxes.firstIndex(of: absAxes.max()!)!
+            let axisNames = ["X (lateral)", "Y (vertical)", "Z (longitudinal)"]
+            print("🧲 [Telemetry] Gravity detected on axis: \(axisNames[gravityAxis]) (\(String(format: "%.1f", absAxes[gravityAxis] / 9.80665))G)")
+        }
+        
         for data in rawData {
             let time = data.timestamp.seconds
             
-            // Convert raw m/s² to G-force (1G = 9.80665 m/s²)
-            // GoPro MAX axes: X=lateral, Y=vertical (-9.8 at rest), Z=longitudinal
-            let gLat = data.accelX / 9.80665
-            let gVert = data.accelY / 9.80665
-            let gLong = data.accelZ / 9.80665
+            // Subtract gravity bias to get dynamic acceleration only
+            let dynX = (data.accelX - biasX) / 9.80665
+            let dynY = (data.accelY - biasY) / 9.80665
+            let dynZ = (data.accelZ - biasZ) / 9.80665
             
+            // GoPro MAX body frame mapping (confirmed by diagnostics):
+            // Body X = Vertical (gravity axis, ~9.8 m/s² at rest)
+            // Body Y = Lateral (side-to-side = cornering)
+            // Body Z = Longitudinal (front-to-back = braking/accel)
             let point = GPSPoint(
                 latitude: data.coordinate.latitude,
                 longitude: data.coordinate.longitude,
@@ -53,9 +78,9 @@ class TelemetryProcessor: ObservableObject {
                 speed: data.speed,
                 speed3D: data.speed3D,
                 timestamp: time,
-                gForceLateral: gLat,
-                gForceLongitudinal: gLong,
-                gForceVertical: gVert
+                gForceLateral: dynY,
+                gForceLongitudinal: dynZ,
+                gForceVertical: dynX
             )
             
             newPoints.append(point)
@@ -88,6 +113,18 @@ class TelemetryProcessor: ObservableObject {
         
         self.trackPoints = smoothedPoints
         self.calculateBounds()
+        
+        // Diagnostic: show G-force range to verify non-zero dynamic values
+        let latRange = (smoothedPoints.map { $0.gForceLateral }.min() ?? 0, smoothedPoints.map { $0.gForceLateral }.max() ?? 0)
+        let longRange = (smoothedPoints.map { $0.gForceLongitudinal }.min() ?? 0, smoothedPoints.map { $0.gForceLongitudinal }.max() ?? 0)
+        let vertRange = (smoothedPoints.map { $0.gForceVertical }.min() ?? 0, smoothedPoints.map { $0.gForceVertical }.max() ?? 0)
+        print("📊 [Telemetry] G-force range (G): LAT=[\(String(format: "%.3f", latRange.0))…\(String(format: "%.3f", latRange.1))] LON=[\(String(format: "%.3f", longRange.0))…\(String(format: "%.3f", longRange.1))] VRT=[\(String(format: "%.3f", vertRange.0))…\(String(format: "%.3f", vertRange.1))]")
+        
+        // Sample at ~60s mark (should be in-motion)
+        if let sample60 = smoothedPoints.first(where: { $0.timestamp >= 60.0 }) {
+            print("📊 [Telemetry] @60s: LAT=\(String(format: "%.3f", sample60.gForceLateral))G LON=\(String(format: "%.3f", sample60.gForceLongitudinal))G VRT=\(String(format: "%.3f", sample60.gForceVertical))G speed=\(String(format: "%.1f", sample60.speed3D * 3.6))km/h")
+        }
+        
         print("✅ [Telemetry] Ready. Extracted \(smoothedPoints.count) points.")
     }
     

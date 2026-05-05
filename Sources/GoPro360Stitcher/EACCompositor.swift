@@ -14,11 +14,15 @@ final class EACInstruction: NSObject, AVVideoCompositionInstructionProtocol, @un
     var topTilt: Float = 0
     var topRoll: Float = 0
     var topFOV: Float = 90
+    var topFlipH: Bool = false
+    var topFlipV: Bool = false
     
     var bottomPan: Float = 0
     var bottomTilt: Float = 0
     var bottomRoll: Float = 0
     var bottomFOV: Float = 90
+    var bottomFlipH: Bool = false
+    var bottomFlipV: Bool = false
     
     init(timeRange: CMTimeRange, sourceTrackIDs: [NSValue]) {
         self.timeRange = timeRange
@@ -64,9 +68,6 @@ final class EACCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
         let sourceTrackIDs = request.sourceTrackIDs
         
         // We expect Track 0 (Front) and Track 1 (Rear)
-        // Note: AVAsynchronousVideoCompositionRequest might use the relative indices 0 and 1
-        // even if ID are 1 and 2.
-        
         var frontBuffer: CVPixelBuffer?
         var rearBuffer: CVPixelBuffer?
         
@@ -77,20 +78,28 @@ final class EACCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
         
         var topParams = SIMD4<Float>(0, 0, 0, 90)
         var bottomParams = SIMD4<Float>(0, 0, 0, 90)
+        // flipFlags: x=topFlipH, y=topFlipV, z=bottomFlipH, w=bottomFlipV
+        var flipFlags = SIMD4<Float>(0, 0, 0, 0)
         
         if let instr = request.videoCompositionInstruction as? EACInstruction {
             topParams = SIMD4<Float>(instr.topTilt, instr.topPan, instr.topRoll, instr.topFOV)
             bottomParams = SIMD4<Float>(instr.bottomTilt, instr.bottomPan, instr.bottomRoll, instr.bottomFOV)
+            flipFlags = SIMD4<Float>(
+                instr.topFlipH ? 1.0 : 0.0,
+                instr.topFlipV ? 1.0 : 0.0,
+                instr.bottomFlipH ? 1.0 : 0.0,
+                instr.bottomFlipV ? 1.0 : 0.0
+            )
         }
         
         if let front = frontBuffer, let rear = rearBuffer {
-            renderer?.renderStacked(front: front, rear: rear, to: outputBuffer, topParams: topParams, bottomParams: bottomParams)
+            renderer?.renderStacked(front: front, rear: rear, to: outputBuffer, topParams: topParams, bottomParams: bottomParams, flipFlags: flipFlags)
             request.finish(withComposedVideoFrame: outputBuffer)
         } else {
             // Fallback: use whatever we have
             if let firstID = sourceTrackIDs.first?.int32Value,
                let buffer = request.sourceFrame(byTrackID: firstID) {
-                renderer?.renderStacked(front: buffer, rear: buffer, to: outputBuffer, topParams: topParams, bottomParams: bottomParams)
+                renderer?.renderStacked(front: buffer, rear: buffer, to: outputBuffer, topParams: topParams, bottomParams: bottomParams, flipFlags: flipFlags)
                 request.finish(withComposedVideoFrame: outputBuffer)
             } else {
                 request.finish(with: NSError(domain: "EACCompositor", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing source frames"]))

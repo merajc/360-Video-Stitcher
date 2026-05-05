@@ -36,8 +36,8 @@ struct GForceBubble: View {
     let longitudinal: Double
     let vertical: Double
     
-    private let maxG: Double = 3.0
-    private let bubbleSize: CGFloat = 80
+    private let maxG: Double = 2.0
+    private let bubbleSize: CGFloat = 50.0
     
     /// Normalized position of the G dot within the bubble area
     private var dotOffset: CGSize {
@@ -73,28 +73,25 @@ struct GForceBubble: View {
                                height: bubbleSize * CGFloat(ring / maxG))
                 }
                 
-                // Crosshair lines
-                Path { p in
-                    p.move(to: CGPoint(x: 0, y: bubbleSize / 2))
-                    p.addLine(to: CGPoint(x: bubbleSize, y: bubbleSize / 2))
-                }
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                // Crosshair lines (Rectangle centers properly in ZStack)
+                // Crosshair lines (Rectangle centers properly in ZStack)
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: bubbleSize * 1.5, height: 0.5)
                 
-                Path { p in
-                    p.move(to: CGPoint(x: bubbleSize / 2, y: 0))
-                    p.addLine(to: CGPoint(x: bubbleSize / 2, y: bubbleSize))
-                }
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 0.5, height: bubbleSize * 1.5)
                 
                 // G-force dot with trail
                 Circle()
                     .fill(dotColor.opacity(0.3))
-                    .frame(width: 14, height: 14)
+                    .frame(width: 10, height: 10)
                     .offset(dotOffset)
                 
                 Circle()
                     .fill(dotColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 6, height: 6)
                     .shadow(color: dotColor.opacity(0.6), radius: 4)
                     .offset(dotOffset)
                     .animation(.linear(duration: 0.1), value: dotOffset.width)
@@ -104,24 +101,24 @@ struct GForceBubble: View {
                 Text("F")
                     .font(.system(size: 6, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.3))
-                    .offset(y: -(bubbleSize / 2) - 6)
+                    .offset(y: -(bubbleSize * 0.75) - 4)
                 
                 Text("B")
                     .font(.system(size: 6, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.3))
-                    .offset(y: (bubbleSize / 2) + 6)
+                    .offset(y: (bubbleSize * 0.75) + 4)
                 
                 Text("L")
                     .font(.system(size: 6, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.3))
-                    .offset(x: -(bubbleSize / 2) - 6)
+                    .offset(x: -(bubbleSize * 0.75) - 4)
                 
                 Text("R")
                     .font(.system(size: 6, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.3))
-                    .offset(x: (bubbleSize / 2) + 6)
+                    .offset(x: (bubbleSize * 0.75) + 4)
             }
-            .frame(width: bubbleSize + 16, height: bubbleSize + 16)
+            .frame(width: bubbleSize * 1.5 + 16, height: bubbleSize * 1.5 + 16)
             
             // Numeric readout
             HStack(spacing: 8) {
@@ -143,10 +140,11 @@ struct GAxisLabel: View {
             Text(axis)
                 .font(.system(size: 6, weight: .bold, design: .rounded))
                 .foregroundColor(color.opacity(0.7))
-            Text(String(format: "%.1f", value))
-                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+            Text(String(format: "%+.2f", value)) // Always show + or -
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
                 .foregroundColor(.white)
         }
+        .frame(width: 32)
     }
 }
 
@@ -200,5 +198,6 @@ struct TelemetryGauge: View {
             }
             .frame(width: 50, height: 50)
         }
+        .frame(width: 55)
     }
 }
