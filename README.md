@@ -40,6 +40,12 @@ make build
 make run
 ```
 
+### Install to Applications Folder
+To install the app permanently to your macOS Applications folder:
+```bash
+make install
+```
+
 ### Headless End-to-End Test
 To verify the engine without the UI:
 ```bash
@@ -56,10 +62,14 @@ To verify the engine without the UI:
 ## 🗺 Roadmap
 - [x] **UI Progress Reporting:** Add real-time progress bars for export and batch operations.
 - [x] **Advanced Export Controls:** Selection for output resolution (up to 5.6K), bitrate, and HEVC/ProRes encoding profiles.
-- [x] **Append continuous files:** GoPro tends to cut files when they reach 4GB, we want the ability to combine files and apply the same controls (tilt, pan, roll, zoom) for transition-less continuous shots
+- [x] **Append continuous files:** GoPro tends to cut files when they reach 4GB, we want the ability to combine files and apply the same controls (tilt, pan, roll, zoom) for transition-less continuous shots.
 - [x] **Batch Processing Queue:** Ability to queue multiple `.360` files for headless background stitching and export.
 - [x] **State Persistence:** Automatically save and restore Pan, Tilt, Roll, and Zoom settings.
 - [x] **Telemetry Visualizations:** Dynamic GPS maps, speedometers, and G-force gauges overlaid on the video using GPMF data.
 - [x] **Spatial Audio (Ambisonics):** Proper mapping of GoPro's 4-channel ambisonic audio to a spatialized 360 soundscape.
 - [x] **Close video file:** Allow user to close the video file and open new one(s) instead of shutting down the application to open a new video file.
+- [ ] **Multi-File Visibility:** Detailed settings and file info for individual appended clips within a single timeline.
+- [ ] **Queue Management:** Enhanced batch queue controls (remove specific items, multi-threaded processing).
+- [ ] **Direct Manipulation (Gauges):** Drag-and-drop gauge positioning directly on the video player.
+- [ ] **Interactive Reframing:** Use mouse gestures on the player for intuitive Pan, Tilt, and Zoom control.
 - [ ] **AI Super-Resolution:** Integrate CoreML for hardware-accelerated upscaling during the export pipeline.
