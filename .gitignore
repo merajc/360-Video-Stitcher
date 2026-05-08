@@ -4,3 +4,4 @@ Packages/
 DerivedData/
 *.swp
 *.lock
+*.app
