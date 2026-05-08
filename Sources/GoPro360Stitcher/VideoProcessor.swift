@@ -714,13 +714,9 @@ class VideoProcessor: ObservableObject {
                                 
                                 if status == kCVReturnSuccess, let newPixelBuffer = newPixelBuffer {
                                     let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
-                                    let fgRaw = CIImage(cgImage: overlayCGImage)
-                                    let fgFlipped = fgRaw.transformed(
-                                        by: CGAffineTransform(scaleX: 1, y: -1)
-                                            .translatedBy(x: 0, y: -fgRaw.extent.height)
-                                    )
+                                    let fgImage = CIImage(cgImage: overlayCGImage)
                                     
-                                    let composite = fgFlipped.composited(over: bgImage)
+                                    let composite = fgImage.composited(over: bgImage)
                                     ciContext.render(composite, to: newPixelBuffer)
                                     
                                     if safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime) {
