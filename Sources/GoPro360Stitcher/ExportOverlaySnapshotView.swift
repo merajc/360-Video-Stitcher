@@ -36,35 +36,43 @@ struct ExportOverlaySnapshotView: View {
     let scale: Double
 
     var body: some View {
-        let uiScale = scale * (size.width / 1080.0)
+        // The UI preview viewport is 9:16 aspect, maxHeight 700pt → ~394 × 700pt.
+        // Overlay elements are sized for that ~394pt-wide reference canvas.
+        // Scale everything proportionally to the export canvas size.
+        let uiReferenceWidth: CGFloat = 9.0 / 16.0 * 700.0  // ≈ 393.75pt — matches ContentView
+        let exportScale = size.width / uiReferenceWidth       // e.g. 2160 / 393.75 ≈ 5.49
 
         ZStack {
             VStack {
                 HStack {
                     Spacer()
                     if showTrackMap && !snapshot.trackPoints.isEmpty {
+                        // UI uses 100×100pt track map with 10pt outer padding
                         SnapshotTrackMapView(snapshot: snapshot)
-                            .frame(width: 150 * uiScale, height: 150 * uiScale)
-                            .background(Color.black.opacity(0.45))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1))
-                            .padding(20 * uiScale)
+                            .frame(width: 100 * exportScale, height: 100 * exportScale)
+                            .background(Color.black.opacity(0.3))
+                            .clipShape(RoundedRectangle(cornerRadius: 8 * exportScale))
+                            .overlay(RoundedRectangle(cornerRadius: 8 * exportScale)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1 * exportScale))
                     }
                 }
                 Spacer()
                 if showDashboard {
-                    SnapshotDashboardView(
-                        snapshot: snapshot,
-                        showSpeed: showSpeed,
-                        showAltitude: showAltitude,
-                        showGForce: showGForce
-                    )
-                    .scaleEffect(uiScale, anchor: .bottomTrailing)
-                    .padding(.bottom, 40 * uiScale)
-                    .padding(.trailing, 20 * uiScale)
+                    HStack {
+                        Spacer()
+                        SnapshotDashboardView(
+                            snapshot: snapshot,
+                            showSpeed: showSpeed,
+                            showAltitude: showAltitude,
+                            showGForce: showGForce
+                        )
+                        // UI uses .scaleEffect(telemetryScale) on the dashboard
+                        .scaleEffect(scale * exportScale, anchor: .bottomTrailing)
+                    }
+                    .padding(.bottom, 20 * exportScale)
                 }
             }
+            .padding(10 * exportScale)  // Matches the UI .padding(10)
         }
         .frame(width: size.width, height: size.height)
     }
