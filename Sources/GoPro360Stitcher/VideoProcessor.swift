@@ -603,6 +603,7 @@ class VideoProcessor: ObservableObject {
         
         let ciContext = CIContext(options: [.cacheIntermediates: false])
         nonisolated(unsafe) let safePixelBufferAdaptor = pixelBufferAdaptor
+        nonisolated(unsafe) let localTelemetry = self.telemetry  // captured for background use
         let localShowTrackMap = self.showTrackMap
         let localShowDashboard = self.showTelemetryDashboard
         let localShowSpeed = self.showSpeedGauge
@@ -612,55 +613,87 @@ class VideoProcessor: ObservableObject {
         let localRes = job.resolution.size
         
         safeVideoInput.requestMediaDataWhenReady(on: videoQueue) {
+            var frameCount = 0
+            var overlaySuccessCount = 0
             while safeVideoInput.isReadyForMoreMediaData {
-                if let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() {
+                autoreleasepool {
+                    guard let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() else {
+                        print("🚀 [Exporter] Video output exhausted. Total frames: \(frameCount), overlay composited: \(overlaySuccessCount)")
+                        safeVideoInput.markAsFinished()
+                        dispatchGroup.leave()
+                        return
+                    }
+                    
                     let pTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                     let pTimeSeconds = pTime.seconds
+                    frameCount += 1
+                    
+                    if frameCount % 60 == 1 {
+                        print("🚀 [Exporter] Frame \(frameCount) @ \(String(format: "%.2f", pTimeSeconds))s  overlays=\(overlaySuccessCount)")
+                    }
                     
                     var appended = false
                     
-                    if localShowTrackMap || localShowDashboard {
-                        if let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-                            let imageContainer = UnsafeImageContainer()
+                    if localShowTrackMap || localShowDashboard,
+                       let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                        
+                        // --- Get a telemetry snapshot (thread-safe, no MainActor needed) ---
+                        let snap = localTelemetry.snapshot(at: pTimeSeconds)
+                        
+                        // --- Render the SwiftUI overlay on the main thread synchronously ---
+                        // DispatchQueue.main.sync is safe here because we are on videoQueue
+                        // (a background queue), NOT on the main thread.
+                        var overlayCGImage: CGImage? = nil
+                        DispatchQueue.main.sync {
+                            let overlayView = ExportOverlaySnapshotView(
+                                snapshot: snap,
+                                size: localRes,
+                                showTrackMap: localShowTrackMap,
+                                showDashboard: localShowDashboard,
+                                showSpeed: localShowSpeed,
+                                showAltitude: localShowAlt,
+                                showGForce: localShowGForce,
+                                scale: localScale
+                            )
+                            let renderer = ImageRenderer(content: overlayView)
+                            renderer.scale = 1.0
+                            renderer.proposedSize = .init(width: localRes.width, height: localRes.height)
+                            overlayCGImage = renderer.cgImage
+                        }
+                        
+                        if let overlayCGImage = overlayCGImage,
+                           let pool = safePixelBufferAdaptor.pixelBufferPool {
                             
-                            let semaphore = DispatchSemaphore(value: 0)
-                            Task { @MainActor in
-                                self.telemetry.updateCurrentTime(pTimeSeconds)
-                                let overlayView = ExportOverlayView(
-                                    telemetry: self.telemetry,
-                                    currentTime: pTimeSeconds,
-                                    size: localRes,
-                                    showTrackMap: localShowTrackMap,
-                                    showDashboard: localShowDashboard,
-                                    showSpeed: localShowSpeed,
-                                    showAltitude: localShowAlt,
-                                    showGForce: localShowGForce,
-                                    scale: localScale
+                            var newPixelBuffer: CVPixelBuffer?
+                            let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
+                            
+                            if status == kCVReturnSuccess, let newPixelBuffer = newPixelBuffer {
+                                // Background pixel buffer: origin is BOTTOM-LEFT (Core Image convention)
+                                let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
+                                
+                                // CGImage origin is TOP-LEFT — flip vertically to match CIImage space
+                                let fgRaw = CIImage(cgImage: overlayCGImage)
+                                let fgFlipped = fgRaw.transformed(
+                                    by: CGAffineTransform(scaleX: 1, y: -1)
+                                        .translatedBy(x: 0, y: -fgRaw.extent.height)
                                 )
-                                let renderer = ImageRenderer(content: overlayView)
-                                renderer.scale = 1.0
-                                renderer.proposedSize = .init(width: localRes.width, height: localRes.height)
-                                imageContainer.image = renderer.cgImage
-                                semaphore.signal()
-                            }
-                            semaphore.wait()
-                            
-                            if let overlayCGImage = imageContainer.image, let pool = safePixelBufferAdaptor.pixelBufferPool {
-                                var newPixelBuffer: CVPixelBuffer?
-                                CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
-                                if let newPixelBuffer = newPixelBuffer {
-                                    let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
-                                    
-                                    // CIImage from CGImage correctly aligns with CVPixelBuffer automatically.
-                                    let fgImage = CIImage(cgImage: overlayCGImage)
-                                    
-                                    let composite = fgImage.composited(over: bgImage)
-                                    ciContext.render(composite, to: newPixelBuffer)
-                                    
-                                    safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime)
+                                
+                                let composite = fgFlipped.composited(over: bgImage)
+                                ciContext.render(composite, to: newPixelBuffer)
+                                
+                                if safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime) {
                                     appended = true
+                                    overlaySuccessCount += 1
+                                } else {
+                                    print("❌ [Exporter] Failed to append composited buffer at \(pTimeSeconds)s")
+                                }
+                            } else {
+                                if frameCount <= 5 {
+                                    print("❌ [Exporter] CVPixelBufferPool create failed, status=\(status) at \(pTimeSeconds)s")
                                 }
                             }
+                        } else if overlayCGImage == nil && frameCount <= 5 {
+                            print("⚠️ [Exporter] ImageRenderer returned nil at \(pTimeSeconds)s — overlay skipped")
                         }
                     }
                     
@@ -671,11 +704,7 @@ class VideoProcessor: ObservableObject {
                     DispatchQueue.main.async {
                         self.exportProgress = pTimeSeconds / durationSeconds
                     }
-                } else {
-                    safeVideoInput.markAsFinished()
-                    dispatchGroup.leave()
-                    break
-                }
+                } // end autoreleasepool
             }
         }
         

@@ -193,4 +193,46 @@ class TelemetryProcessor: ObservableObject {
         self.minLon = tempMinLon
         self.maxLon = tempMaxLon
     }
+    
+    /// Returns a plain-value snapshot for the given timestamp.
+    /// Callable from any thread — no MainActor required.
+    /// Uses the same binary-search logic as updateCurrentTime.
+    nonisolated func snapshot(at time: Double) -> TelemetrySnapshot {
+        // Capture immutable copies of all needed data
+        let points = self.trackPoints
+        let minLa = self.minLat
+        let maxLa = self.maxLat
+        let minLo = self.minLon
+        let maxLo = self.maxLon
+        
+        guard !points.isEmpty else { return TelemetrySnapshot.empty }
+        
+        // Binary search for the latest point at or before `time`
+        var low = 0, high = points.count - 1, index = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if points[mid].timestamp <= time {
+                index = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        
+        let p = points[index]
+        return TelemetrySnapshot(
+            speed: p.speed3D * 3.6,
+            altitude: p.altitude,
+            gForceLateral: p.gForceLateral,
+            gForceLongitudinal: p.gForceLongitudinal,
+            gForceVertical: p.gForceVertical,
+            trackPoints: points,
+            minLat: minLa,
+            maxLat: maxLa,
+            minLon: minLo,
+            maxLon: maxLo,
+            currentTime: time
+        )
+    }
 }
+
