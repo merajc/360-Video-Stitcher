@@ -477,6 +477,13 @@ class VideoProcessor: ObservableObject {
         exportProgress = 0.0
         let totalDuration = maxDuration != nil ? CMTimeMinimum(maxDuration!, job.duration) : job.duration
         
+        // CRITICAL: AVAssetWriter fails if the output file already exists.
+        // Delete it first to prevent "Cannot Save" and nil pixelBufferPool.
+        if FileManager.default.fileExists(atPath: job.outputUrl.path) {
+            try FileManager.default.removeItem(at: job.outputUrl)
+            print("🗑 [Exporter] Removed existing file at \(job.outputUrl.path)")
+        }
+        
         let reader = try AVAssetReader(asset: job.composition)
         let writer = try AVAssetWriter(outputURL: job.outputUrl, fileType: job.codec == .hevc ? .mp4 : .mov)
         
@@ -586,8 +593,20 @@ class VideoProcessor: ObservableObject {
         
         print("🚀 [Exporter] Starting read/write loop...")
         writer.startWriting()
+        
+        // Check that the writer actually started successfully
+        if writer.status == .failed {
+            let err = writer.error?.localizedDescription ?? "Unknown error"
+            print("❌ [Exporter] Writer failed to start: \(err)")
+            throw writer.error ?? NSError(domain: "Exporter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Writer failed to start: \(err)"])
+        }
+        
         reader.startReading()
         writer.startSession(atSourceTime: .zero)
+        
+        // Verify pixelBufferPool is available (it should be after startWriting + startSession)
+        print("🔧 [Exporter] Writer status: \(writer.status.rawValue), pixelBufferPool: \(pixelBufferAdaptor.pixelBufferPool != nil ? "OK" : "NIL")")
+
         
         let dispatchGroup = DispatchGroup()
         let videoQueue = DispatchQueue(label: "com.export.video")
@@ -612,15 +631,23 @@ class VideoProcessor: ObservableObject {
         let localScale = self.telemetryScale
         let localRes = job.resolution.size
         
+        print("🔧 [Exporter] Overlay config: showTrackMap=\(localShowTrackMap) showDashboard=\(localShowDashboard) showSpeed=\(localShowSpeed) showAlt=\(localShowAlt) showGForce=\(localShowGForce) scale=\(localScale) res=\(localRes)")
+        print("🔧 [Exporter] Telemetry points loaded: \(localTelemetry.trackPoints.count)")
+        
         safeVideoInput.requestMediaDataWhenReady(on: videoQueue) {
             var frameCount = 0
             var overlaySuccessCount = 0
-            while safeVideoInput.isReadyForMoreMediaData {
+            var videoExhausted = false
+            
+            while safeVideoInput.isReadyForMoreMediaData && !videoExhausted {
                 autoreleasepool {
                     guard let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() else {
-                        print("🚀 [Exporter] Video output exhausted. Total frames: \(frameCount), overlay composited: \(overlaySuccessCount)")
-                        safeVideoInput.markAsFinished()
-                        dispatchGroup.leave()
+                        if !videoExhausted {
+                            videoExhausted = true
+                            print("🚀 [Exporter] Video output exhausted. Total frames: \(frameCount), overlay composited: \(overlaySuccessCount)")
+                            safeVideoInput.markAsFinished()
+                            dispatchGroup.leave()
+                        }
                         return
                     }
                     
@@ -628,21 +655,29 @@ class VideoProcessor: ObservableObject {
                     let pTimeSeconds = pTime.seconds
                     frameCount += 1
                     
-                    if frameCount % 60 == 1 {
+                    let isDebugFrame = frameCount <= 3
+                    
+                    if frameCount % 60 == 1 || isDebugFrame {
                         print("🚀 [Exporter] Frame \(frameCount) @ \(String(format: "%.2f", pTimeSeconds))s  overlays=\(overlaySuccessCount)")
                     }
                     
                     var appended = false
                     
-                    if localShowTrackMap || localShowDashboard,
-                       let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                    let wantOverlay = localShowTrackMap || localShowDashboard
+                    let hasImageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) != nil
+                    
+                    if isDebugFrame {
+                        print("🔬 [Exporter] Frame \(frameCount): wantOverlay=\(wantOverlay) hasImageBuffer=\(hasImageBuffer)")
+                    }
+                    
+                    if wantOverlay, let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
                         
-                        // --- Get a telemetry snapshot (thread-safe, no MainActor needed) ---
                         let snap = localTelemetry.snapshot(at: pTimeSeconds)
                         
-                        // --- Render the SwiftUI overlay on the main thread synchronously ---
-                        // DispatchQueue.main.sync is safe here because we are on videoQueue
-                        // (a background queue), NOT on the main thread.
+                        if isDebugFrame {
+                            print("🔬 [Exporter] Frame \(frameCount): snapshot speed=\(String(format: "%.1f", snap.speed)) trackPts=\(snap.trackPoints.count)")
+                        }
+                        
                         var overlayCGImage: CGImage? = nil
                         DispatchQueue.main.sync {
                             let overlayView = ExportOverlaySnapshotView(
@@ -659,41 +694,52 @@ class VideoProcessor: ObservableObject {
                             renderer.scale = 1.0
                             renderer.proposedSize = .init(width: localRes.width, height: localRes.height)
                             overlayCGImage = renderer.cgImage
-                        }
-                        
-                        if let overlayCGImage = overlayCGImage,
-                           let pool = safePixelBufferAdaptor.pixelBufferPool {
                             
-                            var newPixelBuffer: CVPixelBuffer?
-                            let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
-                            
-                            if status == kCVReturnSuccess, let newPixelBuffer = newPixelBuffer {
-                                // Background pixel buffer: origin is BOTTOM-LEFT (Core Image convention)
-                                let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
-                                
-                                // CGImage origin is TOP-LEFT — flip vertically to match CIImage space
-                                let fgRaw = CIImage(cgImage: overlayCGImage)
-                                let fgFlipped = fgRaw.transformed(
-                                    by: CGAffineTransform(scaleX: 1, y: -1)
-                                        .translatedBy(x: 0, y: -fgRaw.extent.height)
-                                )
-                                
-                                let composite = fgFlipped.composited(over: bgImage)
-                                ciContext.render(composite, to: newPixelBuffer)
-                                
-                                if safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime) {
-                                    appended = true
-                                    overlaySuccessCount += 1
+                            if isDebugFrame {
+                                if let img = overlayCGImage {
+                                    print("🔬 [Exporter] Frame \(frameCount): ImageRenderer → \(img.width)x\(img.height)")
                                 } else {
-                                    print("❌ [Exporter] Failed to append composited buffer at \(pTimeSeconds)s")
-                                }
-                            } else {
-                                if frameCount <= 5 {
-                                    print("❌ [Exporter] CVPixelBufferPool create failed, status=\(status) at \(pTimeSeconds)s")
+                                    print("🔬 [Exporter] Frame \(frameCount): ImageRenderer → nil")
                                 }
                             }
-                        } else if overlayCGImage == nil && frameCount <= 5 {
-                            print("⚠️ [Exporter] ImageRenderer returned nil at \(pTimeSeconds)s — overlay skipped")
+                        }
+                        
+                        if let overlayCGImage = overlayCGImage {
+                            if let pool = safePixelBufferAdaptor.pixelBufferPool {
+                                var newPixelBuffer: CVPixelBuffer?
+                                let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
+                                
+                                if status == kCVReturnSuccess, let newPixelBuffer = newPixelBuffer {
+                                    let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
+                                    let fgRaw = CIImage(cgImage: overlayCGImage)
+                                    let fgFlipped = fgRaw.transformed(
+                                        by: CGAffineTransform(scaleX: 1, y: -1)
+                                            .translatedBy(x: 0, y: -fgRaw.extent.height)
+                                    )
+                                    
+                                    let composite = fgFlipped.composited(over: bgImage)
+                                    ciContext.render(composite, to: newPixelBuffer)
+                                    
+                                    if safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime) {
+                                        appended = true
+                                        overlaySuccessCount += 1
+                                    } else {
+                                        if frameCount <= 10 { print("❌ [Exporter] pixelBufferAdaptor.append failed at \(pTimeSeconds)s") }
+                                    }
+                                } else {
+                                    if frameCount <= 10 { print("❌ [Exporter] CVPixelBufferPool create failed, status=\(status)") }
+                                }
+                            } else {
+                                if frameCount <= 10 { print("⚠️ [Exporter] pixelBufferPool is nil at \(pTimeSeconds)s") }
+                            }
+                        } else {
+                            if frameCount <= 10 { print("⚠️ [Exporter] ImageRenderer returned nil at \(pTimeSeconds)s") }
+                        }
+                    } else if isDebugFrame {
+                        if !wantOverlay {
+                            print("⚠️ [Exporter] Frame \(frameCount): OVERLAY DISABLED")
+                        } else if !hasImageBuffer {
+                            print("⚠️ [Exporter] Frame \(frameCount): NO IMAGE BUFFER in sample")
                         }
                     }
                     
