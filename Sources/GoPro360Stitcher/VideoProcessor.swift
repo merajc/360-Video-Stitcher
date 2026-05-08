@@ -532,13 +532,6 @@ class VideoProcessor: ObservableObject {
             audioOutput = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: nil)
             if reader.canAdd(audioOutput!) { reader.add(audioOutput!) }
             
-            var audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 192000
-            ]
-            
             // Check if we have 4 channels in the composition (Spatial Audio)
             var has4ChannelAudio = false
             for track in audioTracks {
@@ -552,20 +545,10 @@ class VideoProcessor: ObservableObject {
                 }
             }
             
-            if has4ChannelAudio {
-                var channelLayout = AudioChannelLayout()
-                channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Ambisonic_B_Format
-                let layoutData = Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
-                
-                audioSettings[AVNumberOfChannelsKey] = 4
-                audioSettings[AVChannelLayoutKey] = layoutData
-                print("🔈 [Exporter] Configured 4-Channel Ambisonics audio output.")
-            } else {
-                print("🔈 [Exporter] Configured 2-Channel Stereo audio output.")
-            }
+            var audioSettings: [String: Any]
             
             if job.codec == .prores {
-                // ProRes typical audio is LPCM
+                // ProRes uses LPCM — can handle 4-channel Ambisonics B-format
                 audioSettings = [
                     AVFormatIDKey: kAudioFormatLinearPCM,
                     AVSampleRateKey: 48000,
@@ -579,8 +562,28 @@ class VideoProcessor: ObservableObject {
                 if has4ChannelAudio {
                     var channelLayout = AudioChannelLayout()
                     channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Ambisonic_B_Format
-                    let layoutData = Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
+                    channelLayout.mNumberChannelDescriptions = 0
+                    let layoutSize = MemoryLayout<AudioChannelLayout>.offset(of: \AudioChannelLayout.mChannelDescriptions)!
+                    let layoutData = Data(bytes: &channelLayout, count: layoutSize)
                     audioSettings[AVChannelLayoutKey] = layoutData
+                    print("🔈 [Exporter] Configured 4-Channel Ambisonics audio output (LPCM).")
+                } else {
+                    print("🔈 [Exporter] Configured 2-Channel Stereo audio output (LPCM).")
+                }
+            } else {
+                // AAC does NOT support 4-channel Ambisonics B-format encoding.
+                // Attempting it causes a segfault in AVFoundation's encoder init.
+                // Always downmix to stereo for AAC output.
+                audioSettings = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48000,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 192000
+                ]
+                if has4ChannelAudio {
+                    print("🔈 [Exporter] Source has 4-ch Ambisonics but AAC only supports stereo — downmixing to 2-ch.")
+                } else {
+                    print("🔈 [Exporter] Configured 2-Channel Stereo audio output (AAC).")
                 }
             }
             
