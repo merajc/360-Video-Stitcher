@@ -2,11 +2,11 @@ import SwiftUI
 import AVFoundation
 
 @main
-struct GoPro360StitcherApp: App {
+struct VideoStitcherApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        WindowGroup("GoPro 360 Stitcher") {
+        WindowGroup("360 Video Stitcher") {
             ContentView()
                 .frame(minWidth: 800, minHeight: 600)
         }

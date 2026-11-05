@@ -2,17 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "GoPro360Stitcher",
+    name: "360VideoStitcher",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "GoPro360Stitcher", targets: ["GoPro360Stitcher"])
+        // Binary name: 360VideoStitcher. The Swift target is Stitcher360 because a
+        // module name cannot start with a digit.
+        .executable(name: "360VideoStitcher", targets: ["Stitcher360"])
     ],
     targets: [
         .executableTarget(
-            name: "GoPro360Stitcher",
-            path: "Sources/GoPro360Stitcher",
+            name: "Stitcher360",
+            path: "Sources/Stitcher360",
             // Shipped as a plain resource (not a .metal build input) and compiled at
             // runtime via MTLLibrary.makeLibrary(source:). This keeps `swift build`
             // working on machines without the optional Xcode 26 "Metal Toolchain".

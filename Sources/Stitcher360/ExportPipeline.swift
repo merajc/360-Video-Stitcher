@@ -63,20 +63,20 @@ final class ExportErrorBox: @unchecked Sendable {
 enum ExportStreamError {
     static func videoFrame(time: Double) -> NSError {
         NSError(
-            domain: "GoPro360Stitcher",
+            domain: "360VideoStitcher",
             code: -3,
             userInfo: [NSLocalizedDescriptionKey: "The video encoder stopped accepting frames at \(String(format: "%.2f", time))s. The export was stopped to avoid a truncated file."]
         )
     }
 
     static let audio = NSError(
-        domain: "GoPro360Stitcher",
+        domain: "360VideoStitcher",
         code: -4,
         userInfo: [NSLocalizedDescriptionKey: "The audio encoder stopped accepting samples. The export was stopped to avoid a truncated file."]
     )
 
     static let cancelled = NSError(
-        domain: "GoPro360Stitcher",
+        domain: "360VideoStitcher",
         code: -2,
         userInfo: [NSLocalizedDescriptionKey: "Export cancelled."]
     )
@@ -286,7 +286,7 @@ extension VideoProcessor {
         if reader.status == .failed {
             writer.cancelWriting()
             throw reader.error ?? NSError(
-                domain: "GoPro360Stitcher",
+                domain: "360VideoStitcher",
                 code: -5,
                 userInfo: [NSLocalizedDescriptionKey: "The decoder failed while reading the source video."]
             )
@@ -294,7 +294,7 @@ extension VideoProcessor {
 
         if writer.status == .failed {
             throw writer.error ?? NSError(
-                domain: "GoPro360Stitcher",
+                domain: "360VideoStitcher",
                 code: -6,
                 userInfo: [NSLocalizedDescriptionKey: "The encoder failed while writing the output file."]
             )
@@ -304,7 +304,7 @@ extension VideoProcessor {
 
         if writer.status == .failed {
             throw writer.error ?? NSError(
-                domain: "GoPro360Stitcher",
+                domain: "360VideoStitcher",
                 code: -7,
                 userInfo: [NSLocalizedDescriptionKey: "The output file could not be finalised."]
             )

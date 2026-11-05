@@ -1,4 +1,5 @@
-PRODUCT_NAME=GoPro360Stitcher
+PRODUCT_NAME=360VideoStitcher
+APP_NAME=360 Video Stitcher.app
 BUILD_DIR=.build
 
 all: build
@@ -19,6 +20,6 @@ install:
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -rf $(PRODUCT_NAME).app
+	rm -rf "$(APP_NAME)"
 
 .PHONY: all build run bundle install clean

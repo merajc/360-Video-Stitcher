@@ -5,9 +5,9 @@ import os
 /// of the Console by default; failures are emitted at `error` level.
 ///
 /// To watch a run:
-///   log stream --predicate 'subsystem == "com.merajc.GoPro360Stitcher"' --level debug
+///   log stream --predicate 'subsystem == "com.merajc.360VideoStitcher"' --level debug
 enum Log {
-    private static let subsystem = "com.merajc.GoPro360Stitcher"
+    private static let subsystem = "com.merajc.360VideoStitcher"
     private static let logger = Logger(subsystem: subsystem, category: "app")
 
     static func debug(_ message: String) {

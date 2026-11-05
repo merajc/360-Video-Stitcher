@@ -2,8 +2,6 @@
 
 A native macOS app for stitching, reframing and exporting GoPro MAX `.360` footage — Swift, AVFoundation and Metal, with no ffmpeg, no Python and no GoPro app in the pipeline.
 
-> The product is named **360 Video Stitcher**; the executable and app bundle are still built as `GoPro360Stitcher` (see [Build and run](#build-and-run)).
-
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## What it does
@@ -30,18 +28,18 @@ You do **not** need to download Apple's optional "Metal Toolchain" component (Xc
 ```bash
 make build     # release build
 make run       # build and launch
-make bundle    # package GoPro360Stitcher.app (ad-hoc signed)
+make bundle    # package "360 Video Stitcher.app" (ad-hoc signed)
 make install   # build, bundle and copy to /Applications
 ```
 
-`make bundle` produces a self-contained `GoPro360Stitcher.app` with the shader resource embedded. It is signed ad-hoc, so it runs on the machine that built it; distributing it to other Macs requires your own Developer ID signature and notarisation.
+`make bundle` produces a self-contained `360 Video Stitcher.app` (binary: `360VideoStitcher`) with the shader resource embedded. It is signed ad-hoc, so it runs on the machine that built it; distributing it to other Macs requires your own Developer ID signature and notarisation.
 
 ## Headless export
 
 Useful for scripting and for checking the engine end-to-end without the UI:
 
 ```bash
-./.build/release/GoPro360Stitcher \
+./.build/release/360VideoStitcher \
     --test-file "/path/to/GH010001.360" \
     --output "/path/to/output.mp4" \
     --test-duration 15
@@ -58,7 +56,7 @@ The command exits `0` on success and `1` on failure, and prints progress to stdo
 Diagnostics go to the unified log at `debug` level, so they stay out of the way during normal use:
 
 ```bash
-log stream --predicate 'subsystem == "com.merajc.GoPro360Stitcher"' --level debug
+log stream --predicate 'subsystem == "com.merajc.360VideoStitcher"' --level debug
 ```
 
 Errors that reach the UI are also written at `error` level.
