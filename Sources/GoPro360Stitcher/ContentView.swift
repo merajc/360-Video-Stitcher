@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UniformTypeIdentifiers
 import AVKit
 
@@ -127,7 +128,7 @@ struct ContentView: View {
                         VStack(spacing: 20) {
                             ProgressView()
                                 .scaleEffect(1.5)
-                            Text("Rendering Video...")
+                            Text(processor.isCancellingExport ? "Cancelling Export…" : "Rendering Video…")
                                 .font(.headline)
                             
                             VStack(spacing: 8) {
@@ -138,6 +139,12 @@ struct ContentView: View {
                                     .font(.title3.monospaced())
                                     .bold()
                             }
+                            
+                            Button("Cancel Export") {
+                                processor.cancelExport()
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(processor.isCancellingExport)
                         }
                     } else if let player = processor.player {
                         VStack(spacing: 20) {
@@ -215,17 +222,21 @@ struct ContentView: View {
                                     
                                     Spacer()
                                     
-                                    // Spatial Audio indicator
+                                    // Audio output indicator — reflects what the
+                                    // selected codec can actually write.
                                     HStack(spacing: 4) {
-                                        Image(systemName: processor.exportSpatialAudio ? "hifispeaker.and.homepodmini.fill" : "speaker.2.fill")
+                                        Image(systemName: spatialAudioActive ? "hifispeaker.and.homepodmini.fill" : "speaker.2.fill")
                                             .font(.caption)
-                                        Text(processor.exportSpatialAudio ? "Spatial" : "Stereo")
+                                        Text(spatialAudioActive ? "Spatial (4-ch)" : "Stereo")
                                             .font(.system(size: 9, weight: .bold, design: .rounded))
                                     }
-                                    .foregroundColor(processor.exportSpatialAudio ? .cyan : .secondary)
+                                    .foregroundColor(spatialAudioActive ? .cyan : .secondary)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
                                     .background(Capsule().fill(Color.white.opacity(0.1)))
+                                    .help(spatialAudioActive
+                                          ? "4-channel B-format Ambisonics is preserved in the ProRes export."
+                                          : "HEVC/MP4 exports stereo AAC audio.")
                                 }
                                 .frame(width: 400)
                                 
@@ -387,13 +398,22 @@ struct ContentView: View {
                                 }
                             }
                             
-                            Toggle("Spatial Audio (Ambisonics)", isOn: $processor.exportSpatialAudio)
-                                .toggleStyle(SwitchToggleStyle(tint: .blue))
-                                .onChange(of: processor.exportSpatialAudio) { _, _ in
-                                    Task {
-                                        await processor.reloadAudioTrack()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Toggle("Ambisonic Audio (ProRes only)", isOn: $processor.exportSpatialAudio)
+                                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                    .onChange(of: processor.exportSpatialAudio) { _, _ in
+                                        Task {
+                                            await processor.reloadAudioTrack()
+                                        }
                                     }
-                                }
+                                
+                                Text(processor.exportCodec == .prores
+                                     ? "4-channel B-format is written into the .mov file."
+                                     : "HEVC/MP4 always writes stereo AAC — switch to ProRes 422 to keep 4-channel Ambisonics.")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         .pickerStyle(MenuPickerStyle())
                         
@@ -511,6 +531,27 @@ struct ContentView: View {
             }
             return true
         }
+        .alert(
+            "Something Went Wrong",
+            isPresented: Binding(
+                get: { processor.error != nil },
+                set: { presented in
+                    if !presented { processor.clearError() }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                processor.clearError()
+            }
+        } message: {
+            Text(processor.error?.localizedDescription ?? "Unknown error.")
+        }
+    }
+    
+    /// Ambisonics only survive the ProRes path — the indicator should not claim
+    /// "Spatial" for an HEVC export that will be stereo.
+    private var spatialAudioActive: Bool {
+        processor.exportSpatialAudio && processor.exportCodec == .prores
     }
     
     private func selectFiles() {

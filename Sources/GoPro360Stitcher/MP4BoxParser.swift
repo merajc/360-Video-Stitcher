@@ -25,7 +25,7 @@ class MP4BoxParser {
             
             return try parseBoxes(endOffset: fileSize, targetFormat: "gpmd")
         } catch {
-            print("⚠️ [MP4BoxParser] Error: \(error)")
+            Log.debug("[MP4BoxParser] Error: \(error)")
             return nil
         }
     }

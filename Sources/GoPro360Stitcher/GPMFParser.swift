@@ -17,15 +17,15 @@ struct GPSData {
 
 class GPMFParser {
     func extractGPSData(from url: URL) async -> [GPSData] {
-        print("🗺 [GPMF] Scanning asset for telemetry tracks via native parser...")
+        Log.debug("[GPMF] Scanning asset for telemetry tracks via native parser...")
         let parser = MP4BoxParser(url: url)
         
         guard let (samples, timescale) = parser.extractGPMFSamples() else {
-            print("⚠️ [GPMF] No 'gpmd' track found.")
+            Log.debug("[GPMF] No 'gpmd' track found.")
             return []
         }
         
-        print("🗺 [GPMF] Found GoPro Metadata track. Processing \(samples.count) blocks...")
+        Log.debug("[GPMF] Found GoPro Metadata track. Processing \(samples.count) blocks...")
         
         var allGPSData: [GPSData] = []
         var allAccelData: [AccelSample] = []
@@ -64,10 +64,10 @@ class GPMFParser {
                     allGPSData[i].accelZ = accel.z
                 }
             }
-            print("📐 [GPMF] Merged \(allAccelData.count) ACCL → \(allGPSData.count) GPS. First ACCL raw: x=\(String(format: "%.2f", allAccelData[0].x)) y=\(String(format: "%.2f", allAccelData[0].y)) z=\(String(format: "%.2f", allAccelData[0].z)). First GPS.accel: x=\(String(format: "%.2f", allGPSData[0].accelX)) y=\(String(format: "%.2f", allGPSData[0].accelY)) z=\(String(format: "%.2f", allGPSData[0].accelZ))")
+            Log.debug("[GPMF] Merged \(allAccelData.count) ACCL → \(allGPSData.count) GPS. First ACCL raw: x=\(String(format: "%.2f", allAccelData[0].x)) y=\(String(format: "%.2f", allAccelData[0].y)) z=\(String(format: "%.2f", allAccelData[0].z)). First GPS.accel: x=\(String(format: "%.2f", allGPSData[0].accelX)) y=\(String(format: "%.2f", allGPSData[0].accelY)) z=\(String(format: "%.2f", allGPSData[0].accelZ))")
         }
         
-        print("✅ [GPMF] Extraction finished. Found \(allGPSData.count) GPS points.")
+        Log.debug("[GPMF] Extraction finished. Found \(allGPSData.count) GPS points.")
         return allGPSData
     }
     

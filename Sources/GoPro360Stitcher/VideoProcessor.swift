@@ -58,11 +58,6 @@ enum ExportBitrate: String, CaseIterable, Identifiable {
     }
 }
 
-final class UnsafeImageContainer: @unchecked Sendable {
-    var image: CGImage?
-}
-
-
 @MainActor
 class VideoProcessor: ObservableObject {
     @Published var composition: AVMutableComposition?
@@ -74,6 +69,11 @@ class VideoProcessor: ObservableObject {
     @Published var exportProgress: Double = 0.0
     @Published var isExporting: Bool = false
     @Published var isPlaying: Bool = false
+    @Published var isCancellingExport: Bool = false
+
+    /// Shared with the export pump queues so a cancel can interrupt an in-flight run.
+    let exportCancelFlag = ExportCancelFlag()
+    var activeWriter: AVAssetWriter?
     
     @Published var exportResolution: ExportResolution = .uhd4k
     @Published var exportCodec: ExportCodec = .hevc
@@ -121,7 +121,7 @@ class VideoProcessor: ObservableObject {
         // Store URLs for reloading
         self.loadedURLs = urls
         
-        print("📽 [Processor] Starting ingestion of \(urls.count) items...")
+        Log.debug("[Processor] Starting ingestion of \(urls.count) items...")
         
         // 1. Handle security scoping for Mac URLs
         let scopedUrls = urls.compactMap { url -> URL? in
@@ -135,21 +135,21 @@ class VideoProcessor: ObservableObject {
         do {
             // 2. Filter out .LRV, .THM and keep only .360 files
             let videoUrls = scopedUrls.filter { $0.pathExtension.lowercased() == "360" }
-            print("📽 [Processor] Found \(videoUrls.count) valid .360 files.")
+            Log.debug("[Processor] Found \(videoUrls.count) valid .360 files.")
             guard !videoUrls.isEmpty else { 
-                print("⚠️ [Processor] No .360 files found. Aborting.")
+                Log.debug("[Processor] No .360 files found. Aborting.")
                 return 
             }
             
             // 3. Sort by creation date
-            print("📽 [Processor] Sorting chapters by creation date...")
+            Log.debug("[Processor] Sorting chapters by creation date...")
             let sortedUrls = try sortFilesByCreationDate(urls: videoUrls)
             for (idx, url) in sortedUrls.enumerated() {
-                print("   [\(idx)] \(url.lastPathComponent)")
+                Log.debug("   [\(idx)] \(url.lastPathComponent)")
             }
             
             // 4. Setup virtual stitching via AVMutableComposition
-            print("📽 [Processor] Initializing virtual stitching...")
+            Log.debug("[Processor] Initializing virtual stitching...")
             try await stitchFiles(urls: sortedUrls)
             
             // 5. Extract GPS Telemetry from ALL chapters
@@ -158,7 +158,7 @@ class VideoProcessor: ObservableObject {
             var timeOffset: Double = 0.0
             
             for url in sortedUrls {
-                print("📽 [Processor] Extracting telemetry from \(url.lastPathComponent)...")
+                Log.debug("[Processor] Extracting telemetry from \(url.lastPathComponent)...")
                 let chapterPoints = await parser.extractGPSData(from: url)
                 
                 // Offset timestamps so they're continuous across the stitched composition
@@ -186,7 +186,7 @@ class VideoProcessor: ObservableObject {
                 timeOffset += duration.seconds
                 try? FileManager.default.removeItem(at: tempUrl)
                 
-                print("   ↳ \(chapterPoints.count) points (cumulative offset: \(String(format: "%.1f", timeOffset))s)")
+                Log.debug("   ↳ \(chapterPoints.count) points (cumulative offset: \(String(format: "%.1f", timeOffset))s)")
             }
             
             // Ensure all points are strictly sorted chronologically across chapters
@@ -194,17 +194,31 @@ class VideoProcessor: ObservableObject {
             
             self.telemetry.loadTelemetry(allPoints)
             self.extractedTelemetry = allPoints.map { $0.coordinate }
-            print("✅ [Processor] Total telemetry: \(allPoints.count) GPS points across \(sortedUrls.count) chapters.")
+            Log.debug("[Processor] Total telemetry: \(allPoints.count) GPS points across \(sortedUrls.count) chapters.")
             
-            print("✅ [Processor] Virtual timeline ready.")
+            Log.debug("[Processor] Virtual timeline ready.")
             
         } catch {
             self.error = error
-            print("❌ [Processor] Error processing files: \(error.localizedDescription)")
+            Log.error("[Processor] Error processing files: \(error.localizedDescription)")
         }
     }
     
     // MARK: - Playback Controls
+    
+    /// Dismisses the most recent ingest/export error shown to the user.
+    func clearError() {
+        error = nil
+    }
+    
+    /// Stops an in-flight export. The encoder is cancelled immediately so a stalled
+    /// writer cannot leave the UI waiting forever.
+    func cancelExport() {
+        guard isExporting else { return }
+        isCancellingExport = true
+        exportCancelFlag.set()
+        activeWriter?.cancelWriting()
+    }
     
     func togglePlayback() {
         guard let player = player else { return }
@@ -228,7 +242,7 @@ class VideoProcessor: ObservableObject {
         batchQueue = []
         error = nil
         exportProgress = 0.0
-        print("📁 [Processor] File closed. Ready for new files.")
+        Log.debug("[Processor] File closed. Ready for new files.")
     }
     
     /// Reload the composition with the current spatial audio setting, preserving playback position
@@ -281,24 +295,24 @@ class VideoProcessor: ObservableObject {
         var currentTime = CMTime.zero
         
         for url in urls {
-            print("📽 [Stitcher] Processing chapter: \(url.path)")
+            Log.debug("[Stitcher] Processing chapter: \(url.path)")
             
             // WORKAROUND: AVFoundation does not natively recognize .360 extension.
             let tempDir = FileManager.default.temporaryDirectory
             let tempUrl = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mp4")
             
-            print("📽 [Stitcher]   - Creating symlink: \(tempUrl.path)")
+            Log.debug("[Stitcher]   - Creating symlink: \(tempUrl.path)")
             do {
                 try FileManager.default.createSymbolicLink(at: tempUrl, withDestinationURL: url)
             } catch {
-                print("⚠️ [Stitcher] Failed to create symlink: \(error.localizedDescription)")
+                Log.debug("[Stitcher] Failed to create symlink: \(error.localizedDescription)")
             }
             
             let assetUrl = FileManager.default.fileExists(atPath: tempUrl.path) ? tempUrl : url
             if assetUrl == url {
-                print("⚠️ [Stitcher]   - Symlink check failed, using original URL.")
+                Log.debug("[Stitcher]   - Symlink check failed, using original URL.")
             } else {
-                print("📽 [Stitcher]   - Symlink confirmed at: \(assetUrl.path)")
+                Log.debug("[Stitcher]   - Symlink confirmed at: \(assetUrl.path)")
             }
             
             let asset = AVURLAsset(url: assetUrl)
@@ -306,19 +320,19 @@ class VideoProcessor: ObservableObject {
             defer {
                 if assetUrl != url {
                     try? FileManager.default.removeItem(at: assetUrl)
-                    print("📽 [Stitcher]   - Cleaned up symlink.")
+                    Log.debug("[Stitcher]   - Cleaned up symlink.")
                 }
             }
             
-            print("📽 [Stitcher]   - Loading tracks...")
+            Log.debug("[Stitcher]   - Loading tracks...")
             do {
                 let videoTracks = try await asset.loadTracks(withMediaType: .video)
                 let audioTracks = try await asset.loadTracks(withMediaType: .audio)
                 
-                print("📽 [Stitcher]   - Found \(videoTracks.count) video tracks and \(audioTracks.count) audio tracks.")
+                Log.debug("[Stitcher]   - Found \(videoTracks.count) video tracks and \(audioTracks.count) audio tracks.")
                 
                 guard videoTracks.count >= 2 else {
-                    print("❌ [Stitcher] Missing dual-video tracks in \(url.lastPathComponent).")
+                    Log.error("[Stitcher] Missing dual-video tracks in \(url.lastPathComponent).")
                     continue
                 }
                 
@@ -330,7 +344,7 @@ class VideoProcessor: ObservableObject {
                            let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) {
                             if streamDesc.pointee.mChannelsPerFrame == 4 {
                                 selectedAudioTrack = track
-                                print("📽 [Stitcher]   - Selected 4-Channel Ambisonics Audio Track.")
+                                Log.debug("[Stitcher]   - Selected 4-Channel Ambisonics Audio Track.")
                                 break
                             }
                         }
@@ -340,12 +354,12 @@ class VideoProcessor: ObservableObject {
                 if selectedAudioTrack == nil {
                     selectedAudioTrack = audioTracks.first
                     if let _ = selectedAudioTrack {
-                        print("📽 [Stitcher]   - Selected Default/Stereo Audio Track.")
+                        Log.debug("[Stitcher]   - Selected Default/Stereo Audio Track.")
                     }
                 }
                 
                 guard let assetAudioTrack = selectedAudioTrack else {
-                    print("❌ [Stitcher] Missing audio track in \(url.lastPathComponent).")
+                    Log.error("[Stitcher] Missing audio track in \(url.lastPathComponent).")
                     continue
                 }
                 
@@ -359,13 +373,13 @@ class VideoProcessor: ObservableObject {
                 try videoTrackRear.insertTimeRange(timeRange, of: assetVideoTrackRear, at: currentTime)
                 try audioTrack.insertTimeRange(timeRange, of: assetAudioTrack, at: currentTime)
                 
-                print("📽 [Stitcher]   - Appended \(String(format: "%.2f", duration.seconds))s Dual-Video at \(String(format: "%.2f", currentTime.seconds))s")
+                Log.debug("[Stitcher]   - Appended \(String(format: "%.2f", duration.seconds))s Dual-Video at \(String(format: "%.2f", currentTime.seconds))s")
                 
                 currentTime = CMTimeAdd(currentTime, duration)
             } catch {
-                print("❌ [Stitcher] Load failed for \(url.lastPathComponent): \(error.localizedDescription)")
+                Log.error("[Stitcher] Load failed for \(url.lastPathComponent): \(error.localizedDescription)")
                 if let nsErr = error as NSError? {
-                    print("   Debug: Domain=\(nsErr.domain) Code=\(nsErr.code) UserInfo=\(nsErr.userInfo)")
+                    Log.debug("   Debug: Domain=\(nsErr.domain) Code=\(nsErr.code) UserInfo=\(nsErr.userInfo)")
                 }
                 throw error
             }
@@ -375,7 +389,7 @@ class VideoProcessor: ObservableObject {
         let item = AVPlayerItem(asset: composition)
         item.videoComposition = generateVideoComposition()
         self.player = AVPlayer(playerItem: item)
-        print("✅ [Stitcher] Composition complete. Total duration: \(String(format: "%.2f", currentTime.seconds))s")
+        Log.debug("[Stitcher] Composition complete. Total duration: \(String(format: "%.2f", currentTime.seconds))s")
     }
     
     private let renderer = EACRenderer()
@@ -468,20 +482,28 @@ class VideoProcessor: ObservableObject {
                 DispatchQueue.main.async {
                     self.batchQueue[index].status = .failed(error.localizedDescription)
                 }
+                // A cancelled job stops the whole queue rather than marching on to the
+                // next file with stale state.
+                if self.exportCancelFlag.isSet { break }
             }
         }
     }
     
     func exportVideoWithWriter(job: ExportJob, maxDuration: CMTime? = nil) async throws {
-        print("🚀 [Exporter] Starting AVAssetWriter export to \(job.outputUrl.path)...")
+        Log.debug("[Exporter] Starting AVAssetWriter export to \(job.outputUrl.path)...")
         exportProgress = 0.0
+        // Reset cancellation here rather than in the pump, so a Cancel clicked while the
+        // writer is still being configured is not silently discarded — and so the flag
+        // cannot leak into the next queued job.
+        exportCancelFlag.clear()
+        isCancellingExport = false
         let totalDuration = maxDuration != nil ? CMTimeMinimum(maxDuration!, job.duration) : job.duration
         
         // CRITICAL: AVAssetWriter fails if the output file already exists.
         // Delete it first to prevent "Cannot Save" and nil pixelBufferPool.
         if FileManager.default.fileExists(atPath: job.outputUrl.path) {
             try FileManager.default.removeItem(at: job.outputUrl)
-            print("🗑 [Exporter] Removed existing file at \(job.outputUrl.path)")
+            Log.debug("[Exporter] Removed existing file at \(job.outputUrl.path)")
         }
         
         let reader = try AVAssetReader(asset: job.composition)
@@ -566,9 +588,9 @@ class VideoProcessor: ObservableObject {
                     let layoutSize = MemoryLayout<AudioChannelLayout>.offset(of: \AudioChannelLayout.mChannelDescriptions)!
                     let layoutData = Data(bytes: &channelLayout, count: layoutSize)
                     audioSettings[AVChannelLayoutKey] = layoutData
-                    print("🔈 [Exporter] Configured 4-Channel Ambisonics audio output (LPCM).")
+                    Log.debug("[Exporter] Configured 4-Channel Ambisonics audio output (LPCM).")
                 } else {
-                    print("🔈 [Exporter] Configured 2-Channel Stereo audio output (LPCM).")
+                    Log.debug("[Exporter] Configured 2-Channel Stereo audio output (LPCM).")
                 }
             } else {
                 // AAC does NOT support 4-channel Ambisonics B-format encoding.
@@ -581,9 +603,9 @@ class VideoProcessor: ObservableObject {
                     AVEncoderBitRateKey: 192000
                 ]
                 if has4ChannelAudio {
-                    print("🔈 [Exporter] Source has 4-ch Ambisonics but AAC only supports stereo — downmixing to 2-ch.")
+                    Log.debug("[Exporter] Source has 4-ch Ambisonics but AAC only supports stereo — downmixing to 2-ch.")
                 } else {
-                    print("🔈 [Exporter] Configured 2-Channel Stereo audio output (AAC).")
+                    Log.debug("[Exporter] Configured 2-Channel Stereo audio output (AAC).")
                 }
             }
             
@@ -594,13 +616,13 @@ class VideoProcessor: ObservableObject {
         
         reader.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
         
-        print("🚀 [Exporter] Starting read/write loop...")
+        Log.debug("[Exporter] Starting read/write loop...")
         writer.startWriting()
         
         // Check that the writer actually started successfully
         if writer.status == .failed {
             let err = writer.error?.localizedDescription ?? "Unknown error"
-            print("❌ [Exporter] Writer failed to start: \(err)")
+            Log.error("[Exporter] Writer failed to start: \(err)")
             throw writer.error ?? NSError(domain: "Exporter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Writer failed to start: \(err)"])
         }
         
@@ -608,186 +630,21 @@ class VideoProcessor: ObservableObject {
         writer.startSession(atSourceTime: .zero)
         
         // Verify pixelBufferPool is available (it should be after startWriting + startSession)
-        print("🔧 [Exporter] Writer status: \(writer.status.rawValue), pixelBufferPool: \(pixelBufferAdaptor.pixelBufferPool != nil ? "OK" : "NIL")")
+        Log.debug("[Exporter] Writer status: \(writer.status.rawValue), pixelBufferPool: \(pixelBufferAdaptor.pixelBufferPool != nil ? "OK" : "NIL")")
 
         
-        let dispatchGroup = DispatchGroup()
-        let videoQueue = DispatchQueue(label: "com.export.video")
-        let audioQueue = DispatchQueue(label: "com.export.audio")
-        
-        var exportError: Error?
-        
-        nonisolated(unsafe) let safeVideoInput = videoInput
-        nonisolated(unsafe) let safeVideoOutput = videoOutput
-        let durationSeconds = totalDuration.seconds
-        
-        dispatchGroup.enter()
-        
-        let ciContext = CIContext(options: [.cacheIntermediates: false])
-        nonisolated(unsafe) let safePixelBufferAdaptor = pixelBufferAdaptor
-        nonisolated(unsafe) let localTelemetry = self.telemetry  // captured for background use
-        let localShowTrackMap = self.showTrackMap
-        let localShowDashboard = self.showTelemetryDashboard
-        let localShowSpeed = self.showSpeedGauge
-        let localShowAlt = self.showAltitudeGauge
-        let localShowGForce = self.showGForceGauge
-        let localScale = self.telemetryScale
-        let localRes = job.resolution.size
-        
-        print("🔧 [Exporter] Overlay config: showTrackMap=\(localShowTrackMap) showDashboard=\(localShowDashboard) showSpeed=\(localShowSpeed) showAlt=\(localShowAlt) showGForce=\(localShowGForce) scale=\(localScale) res=\(localRes)")
-        print("🔧 [Exporter] Telemetry points loaded: \(localTelemetry.trackPoints.count)")
-        
-        safeVideoInput.requestMediaDataWhenReady(on: videoQueue) {
-            var frameCount = 0
-            var overlaySuccessCount = 0
-            var videoExhausted = false
-            
-            while safeVideoInput.isReadyForMoreMediaData && !videoExhausted {
-                autoreleasepool {
-                    guard let sampleBuffer = safeVideoOutput.copyNextSampleBuffer() else {
-                        if !videoExhausted {
-                            videoExhausted = true
-                            print("🚀 [Exporter] Video output exhausted. Total frames: \(frameCount), overlay composited: \(overlaySuccessCount)")
-                            safeVideoInput.markAsFinished()
-                            dispatchGroup.leave()
-                        }
-                        return
-                    }
-                    
-                    let pTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                    let pTimeSeconds = pTime.seconds
-                    frameCount += 1
-                    
-                    let isDebugFrame = frameCount <= 3
-                    
-                    if frameCount % 60 == 1 || isDebugFrame {
-                        print("🚀 [Exporter] Frame \(frameCount) @ \(String(format: "%.2f", pTimeSeconds))s  overlays=\(overlaySuccessCount)")
-                    }
-                    
-                    var appended = false
-                    
-                    let wantOverlay = localShowTrackMap || localShowDashboard
-                    let hasImageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) != nil
-                    
-                    if isDebugFrame {
-                        print("🔬 [Exporter] Frame \(frameCount): wantOverlay=\(wantOverlay) hasImageBuffer=\(hasImageBuffer)")
-                    }
-                    
-                    if wantOverlay, let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-                        
-                        let snap = localTelemetry.snapshot(at: pTimeSeconds)
-                        
-                        if isDebugFrame {
-                            print("🔬 [Exporter] Frame \(frameCount): snapshot speed=\(String(format: "%.1f", snap.speed)) trackPts=\(snap.trackPoints.count)")
-                        }
-                        
-                        var overlayCGImage: CGImage? = nil
-                        DispatchQueue.main.sync {
-                            let overlayView = ExportOverlaySnapshotView(
-                                snapshot: snap,
-                                size: localRes,
-                                showTrackMap: localShowTrackMap,
-                                showDashboard: localShowDashboard,
-                                showSpeed: localShowSpeed,
-                                showAltitude: localShowAlt,
-                                showGForce: localShowGForce,
-                                scale: localScale
-                            )
-                            let renderer = ImageRenderer(content: overlayView)
-                            renderer.scale = 1.0
-                            renderer.proposedSize = .init(width: localRes.width, height: localRes.height)
-                            overlayCGImage = renderer.cgImage
-                            
-                            if isDebugFrame {
-                                if let img = overlayCGImage {
-                                    print("🔬 [Exporter] Frame \(frameCount): ImageRenderer → \(img.width)x\(img.height)")
-                                } else {
-                                    print("🔬 [Exporter] Frame \(frameCount): ImageRenderer → nil")
-                                }
-                            }
-                        }
-                        
-                        if let overlayCGImage = overlayCGImage {
-                            if let pool = safePixelBufferAdaptor.pixelBufferPool {
-                                var newPixelBuffer: CVPixelBuffer?
-                                let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newPixelBuffer)
-                                
-                                if status == kCVReturnSuccess, let newPixelBuffer = newPixelBuffer {
-                                    let bgImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
-                                    let fgImage = CIImage(cgImage: overlayCGImage)
-                                    
-                                    let composite = fgImage.composited(over: bgImage)
-                                    ciContext.render(composite, to: newPixelBuffer)
-                                    
-                                    if safePixelBufferAdaptor.append(newPixelBuffer, withPresentationTime: pTime) {
-                                        appended = true
-                                        overlaySuccessCount += 1
-                                    } else {
-                                        if frameCount <= 10 { print("❌ [Exporter] pixelBufferAdaptor.append failed at \(pTimeSeconds)s") }
-                                    }
-                                } else {
-                                    if frameCount <= 10 { print("❌ [Exporter] CVPixelBufferPool create failed, status=\(status)") }
-                                }
-                            } else {
-                                if frameCount <= 10 { print("⚠️ [Exporter] pixelBufferPool is nil at \(pTimeSeconds)s") }
-                            }
-                        } else {
-                            if frameCount <= 10 { print("⚠️ [Exporter] ImageRenderer returned nil at \(pTimeSeconds)s") }
-                        }
-                    } else if isDebugFrame {
-                        if !wantOverlay {
-                            print("⚠️ [Exporter] Frame \(frameCount): OVERLAY DISABLED")
-                        } else if !hasImageBuffer {
-                            print("⚠️ [Exporter] Frame \(frameCount): NO IMAGE BUFFER in sample")
-                        }
-                    }
-                    
-                    if !appended {
-                        safeVideoInput.append(sampleBuffer)
-                    }
-                    
-                    DispatchQueue.main.async {
-                        self.exportProgress = pTimeSeconds / durationSeconds
-                    }
-                } // end autoreleasepool
-            }
-        }
-        
-        if let aInput = audioInput, let aOutput = audioOutput {
-            nonisolated(unsafe) let safeAudioInput = aInput
-            nonisolated(unsafe) let safeAudioOutput = aOutput
-            dispatchGroup.enter()
-            safeAudioInput.requestMediaDataWhenReady(on: audioQueue) {
-                while safeAudioInput.isReadyForMoreMediaData {
-                    if let sampleBuffer = safeAudioOutput.copyNextSampleBuffer() {
-                        safeAudioInput.append(sampleBuffer)
-                    } else {
-                        safeAudioInput.markAsFinished()
-                        dispatchGroup.leave()
-                        break
-                    }
-                }
-            }
-        }
-        
-        await withCheckedContinuation { continuation in
-            dispatchGroup.notify(queue: .main) {
-                continuation.resume()
-            }
-        }
-        
-        if reader.status == .failed { exportError = reader.error }
-        if writer.status == .failed { exportError = writer.error }
-        
-        if let error = exportError {
-            writer.cancelWriting()
-            print("❌ [Exporter] Export failed: \(error.localizedDescription)")
-            throw error
-        }
-        
-        await writer.finishWriting()
-        
-        print("✅ [Exporter] Export successful! Saved to: \(job.outputUrl.path)")
-        self.exportProgress = 1.0
+        self.activeWriter = writer
+
+        try await runExportStreams(
+            job: job,
+            writer: writer,
+            reader: reader,
+            videoInput: videoInput,
+            videoOutput: videoOutput,
+            pixelBufferAdaptor: pixelBufferAdaptor,
+            audioInput: audioInput,
+            audioOutput: audioOutput,
+            totalDuration: totalDuration
+        )
     }
 }

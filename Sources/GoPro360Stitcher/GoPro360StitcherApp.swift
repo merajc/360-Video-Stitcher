@@ -16,46 +16,77 @@ struct GoPro360StitcherApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
-        if let testIndex = args.firstIndex(of: "--test-file"), testIndex + 1 < args.count {
-            let path = args[testIndex + 1]
-            let durationSeconds = args.firstIndex(of: "--test-duration").flatMap { Int(args[$0 + 1]) } ?? 0
+        guard let testIndex = args.firstIndex(of: "--test-file"), testIndex + 1 < args.count else {
+            return
+        }
+        
+        let inputURL = URL(fileURLWithPath: args[testIndex + 1])
+        let durationSeconds = args.firstIndex(of: "--test-duration").flatMap { Int(args[$0 + 1]) } ?? 0
+        let outputPath = Self.resolveOutputPath(args: args, inputURL: inputURL)
+        
+        try? FileManager.default.createDirectory(
+            at: outputPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? FileManager.default.removeItem(at: outputPath)
+        
+        print("🧪 [TestMode] Starting end-to-end test for: \(inputURL.path)")
+        print("🧪 [TestMode] Output: \(outputPath.path)")
+        if durationSeconds > 0 {
+            print("🧪 [TestMode] Limit: \(durationSeconds) seconds")
+        }
+        
+        Task {
+            let processor = VideoProcessor()
             
-            let outputDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
-            let outputPath = outputDir.appendingPathComponent("Ferrari_10s_Test.mp4")
-            try? FileManager.default.removeItem(at: outputPath)
+            await processor.processFiles(urls: [inputURL])
             
-            print("🧪 [TestMode] Starting end-to-end test for: \(path)")
-            if durationSeconds > 0 {
-                print("🧪 [TestMode] Limit: \(durationSeconds) seconds")
+            guard processor.composition != nil else {
+                print("❌ [TestMode] File processing failed (composition is nil).")
+                exit(1)
             }
             
-            Task {
-                let processor = VideoProcessor()
-                let url = URL(fileURLWithPath: path)
+            print("🧪 [TestMode] File processed successfully. Exporting...")
+            do {
+                let maxDuration = durationSeconds > 0
+                    ? CMTime(seconds: Double(durationSeconds), preferredTimescale: 600)
+                    : nil
+                processor.addToQueue(name: "Test Job", outputUrl: outputPath)
                 
-                await processor.processFiles(urls: [url])
-                
-                if processor.composition != nil {
-                    print("🧪 [TestMode] File processed successfully. Exporting...")
-                    do {
-                        let maxDuration = durationSeconds > 0 ? CMTime(seconds: Double(durationSeconds), preferredTimescale: 600) : nil
-                        processor.addToQueue(name: "Test Job", outputUrl: outputPath)
-                        if let job = processor.batchQueue.first {
-                            try await processor.exportVideoWithWriter(job: job, maxDuration: maxDuration)
-                        }
-                        print("🧪 [TestMode] Export finished at: \(outputPath.path)")
-                        print("✅ [TestMode] TEST PASSED!")
-                        NSApplication.shared.terminate(nil)
-                    } catch {
-                        print("❌ [TestMode] Export failed: \(error.localizedDescription)")
-                        exit(1)
-                    }
-                } else {
-                    print("❌ [TestMode] File processing failed (composition is nil).")
+                guard let job = processor.batchQueue.first else {
+                    print("❌ [TestMode] Could not enqueue the export job.")
                     exit(1)
                 }
+                
+                try await processor.exportVideoWithWriter(job: job, maxDuration: maxDuration)
+                print("🧪 [TestMode] Export finished at: \(outputPath.path)")
+                print("✅ [TestMode] TEST PASSED!")
+                NSApplication.shared.terminate(nil)
+            } catch {
+                print("❌ [TestMode] Export failed: \(error.localizedDescription)")
+                exit(1)
             }
         }
+    }
+    
+    /// `--output <path>` wins. Otherwise the file is written next to the source clip,
+    /// falling back to ~/Movies when that location is read-only (e.g. an SD card).
+    private static func resolveOutputPath(args: [String], inputURL: URL) -> URL {
+        if let index = args.firstIndex(of: "--output"), index + 1 < args.count {
+            return URL(fileURLWithPath: args[index + 1])
+        }
+        
+        let fileName = inputURL.deletingPathExtension().lastPathComponent + "_stitched"
+        let directory = inputURL.deletingLastPathComponent()
+        
+        if FileManager.default.isWritableFile(atPath: directory.path) {
+            return directory.appendingPathComponent(fileName).appendingPathExtension("mp4")
+        }
+        
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies")
+            .appendingPathComponent(fileName)
+            .appendingPathExtension("mp4")
     }
     
     // Enable closing the last window to quit the app, to avoid ghost background processes

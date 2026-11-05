@@ -13,8 +13,11 @@ let package = Package(
         .executableTarget(
             name: "GoPro360Stitcher",
             path: "Sources/GoPro360Stitcher",
+            // Shipped as a plain resource (not a .metal build input) and compiled at
+            // runtime via MTLLibrary.makeLibrary(source:). This keeps `swift build`
+            // working on machines without the optional Xcode 26 "Metal Toolchain".
             resources: [
-                .process("EACShader.metal")
+                .copy("EACShader.msl")
             ]
         )
     ]

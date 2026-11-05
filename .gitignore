@@ -1,7 +1,10 @@
 .DS_Store
 .build/
+.swiftpm/
 Packages/
 DerivedData/
+xcuserdata/
+*.xcuserstate
 *.swp
 *.lock
 *.app
